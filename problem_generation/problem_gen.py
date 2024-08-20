@@ -35,10 +35,10 @@ def distribute(n_instance, n_cpu):
 if __name__ == "__main__":
     instance = None
     n_cpu = 4
-    n_instance = 4
+    n_instance = 100
     
     problem = 'GISP'
-    data_partition = 'train'
+    data_partition = 'test'
     n_nodes = 50
     er_prob = 0.6 #0.33 for FCMCNF, this doesnt change
     whichSet = 'SET2'

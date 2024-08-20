@@ -71,7 +71,7 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
 
 
 
-def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
+def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, with_root_info):
     
     model = sp.Model()
     model.hideOutput()
@@ -90,7 +90,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
     
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
     
-    comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
+    comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1] , with_root_info = with_root_info)
     comp_behaviour_saver_svm = CompFeaturizerSVM(model, f"{save_dir_svm}", instance_name=str(instance).split("/")[-1])
     
     oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm)
@@ -116,10 +116,10 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
     return 1
 
 
-def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device):
+def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device, with_root_info):
     
     for instance in instances:
-        run_episode(oracle_type, instance, save_dir, save_dir_svm, device)
+        run_episode(oracle_type, instance, save_dir, save_dir_svm, device, with_root_info)
         
     print("finished running episodes for process")
         
@@ -141,11 +141,12 @@ def distribute(n_instance, n_cpu):
 
 if __name__ == "__main__":
     
-
+    with_root_info = True # this to save root node info for constrastive learning 
     
     oracle = 'optimal_plunger'
     problem = 'GISP'
     data_partitions = ['train', 'valid'] #dont change
+
     n_cpu = 10
     n_instance = -1
     device = 'cpu'
@@ -178,6 +179,10 @@ if __name__ == "__main__":
 
         save_dir = os.path.join(os.path.dirname(__file__), f'./data/{problem}/{data_partition}')
         save_dir_svm = os.path.join(os.path.dirname(__file__), f'./data_svm/{problem}/{data_partition}')
+
+        if with_root_info:
+            save_dir = os.path.join(os.path.dirname(__file__), f'./data/{problem}/{data_partition}_cl')
+            save_dir_svm = os.path.join(os.path.dirname(__file__), f'./data_svm/{problem}/{data_partition}_cl')
         
         try:
             os.makedirs(save_dir)
@@ -190,6 +195,8 @@ if __name__ == "__main__":
             ""
         
         n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.2*n_instance)
+
+        #n_keep = 1 # for debug
         
         instances = list(Path(os.path.join(os.path.dirname(__file__), 
                                            f"../problem_generation/data/{problem}/{data_partition}")).glob("*.lp"))
@@ -205,7 +212,8 @@ if __name__ == "__main__":
                                                         instances=instances[ p1 : p2], 
                                                         save_dir=save_dir,
                                                         save_dir_svm=save_dir_svm,
-                                                        device=device))
+                                                        device=device,
+                                                        with_root_info = with_root_info))
                         for p,(p1,p2) in enumerate(distribute(len(instances), n_cpu))]
         
         

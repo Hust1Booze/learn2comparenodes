@@ -78,9 +78,10 @@ class CompFeaturizerSVM():
 
 class CompFeaturizer():
     
-    def __init__(self, save_dir=None, instance_name=None):
+    def __init__(self, save_dir=None, instance_name=None, with_root_info = False):
         self.instance_name = instance_name
         self.save_dir = save_dir
+        self.with_root_info = with_root_info
         
     def set_save_dir(self, save_dir):
         self.save_dir = save_dir
@@ -104,7 +105,10 @@ class CompFeaturizer():
         
         triplet = self.get_triplet_tensors(model, node1, node2, comp_res)
         
-        return BipartiteGraphPairData(*triplet[0], *triplet[1], triplet[2])
+        if self.with_root_info:
+            return BipartiteGraphPairData(*triplet[0], *triplet[1],*triplet[2], triplet[3])
+        else:
+            return BipartiteGraphPairData(*triplet[0], *triplet[1], triplet[2])
     
     
     
@@ -162,6 +166,11 @@ class CompFeaturizer():
                 
         self.LP_feature_recorder.record_sub_milp_graph(model, node1)
         self.LP_feature_recorder.record_sub_milp_graph(model, node2)
+        if self.with_root_info:
+            root_node = model.getRootNode()
+            self.LP_feature_recorder.record_sub_milp_graph(model, root_node)
+            g_root_idx = root_node.getNumber()
+
         graphidx2graphdata = self.LP_feature_recorder.recorded_light
         all_conss_blocks = self.LP_feature_recorder.all_conss_blocks
         all_conss_blocks_features = self.LP_feature_recorder.all_conss_blocks_features
@@ -170,25 +179,50 @@ class CompFeaturizer():
         
         var_attributes0, cons_block_idxs0 = graphidx2graphdata[g0_idx]
         var_attributes1, cons_block_idxs1 = graphidx2graphdata[g1_idx]
-        
-        g_data = self._get_graph_pair_data(var_attributes0, 
-                                           var_attributes1, 
-                                                         
-                                           cons_block_idxs0, 
-                                           cons_block_idxs1, 
 
-                                           all_conss_blocks, 
-                                           all_conss_blocks_features, 
-                                           comp_res)
-        
-        bounds0 = [node1.getLowerbound(), node1.getEstimate()]
-        bounds1 = [node2.getLowerbound(), node2.getEstimate()]
-        
-        if model.getObjectiveSense() == 'maximize':
-            bounds0[1], bounds0[0] = bounds0
-            bounds1[1], bounds1[0] = bounds1
+        if self.with_root_info:
+            var_attributes_root, cons_block_idxs_root = graphidx2graphdata[g_root_idx]
+            g_data = self._get_graph_pair_data(var_attributes0, 
+                                            var_attributes1, 
+                                            var_attributes_root,
+                                                            
+                                            cons_block_idxs0, 
+                                            cons_block_idxs1, 
+                                            cons_block_idxs_root,
+
+                                            all_conss_blocks, 
+                                            all_conss_blocks_features, 
+                                            comp_res)
             
-        return self._to_triplet_tensors(g_data, node1.getDepth(), node2.getDepth(), bounds0, bounds1, self.LP_feature_recorder.device)
+            bounds0 = [node1.getLowerbound(), node1.getEstimate()]
+            bounds1 = [node2.getLowerbound(), node2.getEstimate()]
+            bounds_root = [root_node.getLowerbound(), root_node.getEstimate()]
+            
+            if model.getObjectiveSense() == 'maximize':
+                bounds0[1], bounds0[0] = bounds0
+                bounds1[1], bounds1[0] = bounds1
+                bounds_root[1], bounds_root[0] = bounds_root
+
+            return self._to_triplet_tensors(g_data, node1.getDepth(), node2.getDepth(),root_node.getDepth(), bounds0, bounds1, bounds_root, self.LP_feature_recorder.device)
+        else:
+            g_data = self._get_graph_pair_data(var_attributes0, 
+                                            var_attributes1, 
+                                                            
+                                            cons_block_idxs0, 
+                                            cons_block_idxs1, 
+
+                                            all_conss_blocks, 
+                                            all_conss_blocks_features, 
+                                            comp_res)
+            
+            bounds0 = [node1.getLowerbound(), node1.getEstimate()]
+            bounds1 = [node2.getLowerbound(), node2.getEstimate()]
+            
+            if model.getObjectiveSense() == 'maximize':
+                bounds0[1], bounds0[0] = bounds0
+                bounds1[1], bounds1[0] = bounds1
+            
+            return self._to_triplet_tensors(g_data, node1.getDepth(), node2.getDepth(), bounds0, bounds1, self.LP_feature_recorder.device)
     
        
     
@@ -198,7 +232,13 @@ class CompFeaturizer():
         g2 = self._get_graph_data(var_attributes1, cons_block_idxs1, all_conss_blocks, all_conss_blocks_features)
      
         return list(zip(g1,g2)) + [comp_res]
-    
+    def _get_graph_pair_data(self, var_attributes0, var_attributes1,var_attributes_root, cons_block_idxs0, cons_block_idxs1, cons_block_idxs_root, all_conss_blocks, all_conss_blocks_features, comp_res ):
+        
+        g1 = self._get_graph_data(var_attributes0, cons_block_idxs0, all_conss_blocks, all_conss_blocks_features)
+        g2 = self._get_graph_data(var_attributes1, cons_block_idxs1, all_conss_blocks, all_conss_blocks_features)
+        g_root = self._get_graph_data(var_attributes_root, cons_block_idxs_root, all_conss_blocks, all_conss_blocks_features)
+     
+        return list(zip(g1,g2,g_root)) + [comp_res]
     def _get_graph_data(self, var_attributes, cons_block_idxs, all_conss_blocks, all_conss_blocks_features):
         
         
@@ -248,7 +288,42 @@ class CompFeaturizer():
         
         return (g1,g2,y)
     
+    def _to_triplet_tensors(self, g_data, depth0, depth1, depth_root, bounds0, bounds1, bound_root, device ):
         
+        variable_features = g_data[0]
+        constraint_features = g_data[1]
+        edge_indices = g_data[2]
+        edge_features = g_data[3]
+        y = g_data[4]
+        lb0, ub0 = bounds0
+        lb1, ub1 = bounds1
+        lb_root, ub_root = bound_root
+        
+        g1 = (constraint_features[0],
+              edge_indices[0], 
+              edge_features[0], 
+              variable_features[0], 
+              torch.tensor([[lb0, -1*ub0]], device=device).float(),
+              torch.tensor([depth0], device=device).float()
+              )
+        g2 = (constraint_features[1], 
+              edge_indices[1], 
+              edge_features[1], 
+              variable_features[1], 
+              torch.tensor([[lb1, -1*ub1]], device=device).float(),
+              torch.tensor([depth1], device=device).float()
+              )
+        g_root = (constraint_features[2], 
+              edge_indices[2], 
+              edge_features[2], 
+              variable_features[2], 
+              torch.tensor([[lb_root, -1*ub_root]], device=device).float(),
+              torch.tensor([depth_root], device=device).float()
+              )
+        
+        
+        
+        return (g1,g2,g_root,y)        
         
         
 
