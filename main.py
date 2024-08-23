@@ -15,15 +15,15 @@ from utils import record_stats, display_stats, distribute
 from pathlib import Path 
 
 if __name__ == "__main__":
-    
-    n_cpu = 16
+
+    n_cpu = 8 #16
     n_instance = -1
-    nodesels = ['ranknet_dummy_nprimal=2']
+    nodesels = ['gnn_dummy_nprimal=2'] #['ranknet_dummy_nprimal=2']
     
     problem = 'GISP'
     normalize = True
     
-    data_partition = 'transfer'
+    data_partition = 'transfer' #'test' #'transfer'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     verbose = False
     on_log = False
@@ -99,7 +99,8 @@ if __name__ == "__main__":
                                           device=torch.device(device),
                                           normalize=normalize,
                                           verbose=verbose,
-                                          default=default))
+                                          default=default,
+                                          with_root_info = False))
                     for p,(p1,p2) in enumerate(distribute(n_instance, n_cpu)) ]  
 
 

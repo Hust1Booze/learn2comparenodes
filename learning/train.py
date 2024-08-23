@@ -17,19 +17,21 @@ from data_type import GraphDataset
 from utils import process
 
 if __name__ == "__main__":
-    
-    problem = "GISP"
-    lr = 0.005
-    n_epoch = 2
+    debug_model = True
+    with_root_info = True
+    problem = "GISP"#"GISP" "WPMS"
+    lr = 0.001
+    n_epoch = 10
     n_sample = -1
     patience = 10
     early_stopping = 20
     normalize = True
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    batch_train = 16
-    batch_valid  = 256
+    batch_train = 512
+    batch_valid  = 512
     
     loss_fn = torch.nn.BCELoss()
+
     optimizer_fn = torch.optim.Adam
     
     for i in range(1, len(sys.argv), 2):
@@ -67,34 +69,57 @@ if __name__ == "__main__":
     
     valid_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
                                                             f"../node_selection/data/{problem}/valid")).glob("*.pt") ][:int(0.2*n_sample if n_sample != -1 else -1)]
-    
-
+    if with_root_info:
+        train_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
+                                                                f"../node_selection/data/{problem}/train_cl")).glob("*.pt") ][:n_sample]
+        
+        valid_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
+                                                                f"../node_selection/data/{problem}/test_cl")).glob("*.pt") ][:int(0.2*n_sample if n_sample != -1 else -1)]
     if problem == 'FCMCNF':
         train_files = train_files + valid_files[3000:]
         valid_files = valid_files[:3000]
-
-        
 
     train_data = GraphDataset(train_files)
     valid_data = GraphDataset(valid_files)
     
     
 # TO DO : learn something from the data
-    train_loader = torch_geometric.loader.DataLoader(train_data, 
-                                                     batch_size=batch_train, 
-                                                     shuffle=True, 
-                                                     follow_batch=['constraint_features_s', 
-                                                                   'constraint_features_t',
-                                                                   'variable_features_s',
-                                                                   'variable_features_t'])
+    if not with_root_info:
+        train_loader = torch_geometric.loader.DataLoader(train_data, 
+                                                        batch_size=batch_train, 
+                                                        shuffle=True, 
+                                                        follow_batch=['constraint_features_s', 
+                                                                    'constraint_features_t',
+                                                                    'variable_features_s',
+                                                                    'variable_features_t'])
+        
+        valid_loader = torch_geometric.loader.DataLoader(valid_data, 
+                                                        batch_size=batch_valid, 
+                                                        shuffle=False, 
+                                                        follow_batch=['constraint_features_s',
+                                                                    'constraint_features_t',
+                                                                    'variable_features_s',
+                                                                    'variable_features_t'])
+    else:
+        train_loader = torch_geometric.loader.DataLoader(train_data, 
+                                                    batch_size=batch_train, 
+                                                    shuffle=True, 
+                                                    follow_batch=['constraint_features_s', 
+                                                                'constraint_features_t',
+                                                                'constraint_features_root',
+                                                                'variable_features_s',
+                                                                'variable_features_t',
+                                                                'variable_features_root'])
     
-    valid_loader = torch_geometric.loader.DataLoader(valid_data, 
-                                                     batch_size=batch_valid, 
-                                                     shuffle=False, 
-                                                     follow_batch=['constraint_features_s',
-                                                                   'constraint_features_t',
-                                                                   'variable_features_s',
-                                                                   'variable_features_t'])
+        valid_loader = torch_geometric.loader.DataLoader(valid_data, 
+                                                        batch_size=batch_valid, 
+                                                        shuffle=False, 
+                                                        follow_batch=['constraint_features_s',
+                                                                    'constraint_features_t',
+                                                                    'constraint_features_root',
+                                                                    'variable_features_s',
+                                                                    'variable_features_t',
+                                                                    'variable_features_root'])
     
     policy = GNNPolicy().to(device)
     optimizer = optimizer_fn(policy.parameters(), lr=lr) #ADAM is the best
@@ -114,7 +139,7 @@ if __name__ == "__main__":
     print(f"Model's Size:         {sum(p.numel() for p in policy.parameters())} parameters ")
     print("-------------------------") 
     
-    
+    best_valid_acc = -1
     for epoch in range(n_epoch):
         print(f"Epoch {epoch + 1}")
         
@@ -123,7 +148,8 @@ if __name__ == "__main__":
                                         loss_fn,
                                         device,
                                         optimizer=optimizer, 
-                                        normalize=normalize)
+                                        normalize=normalize,
+                                        with_root_info = with_root_info)
         train_losses.append(train_loss)
         train_accs.append(train_acc)
         print(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}" )
@@ -133,13 +159,17 @@ if __name__ == "__main__":
                                         loss_fn, 
                                         device,
                                         optimizer=None,
-                                        normalize=normalize)
+                                        normalize=normalize,
+                                        with_root_info = with_root_info)
         valid_losses.append(valid_loss)
         valid_accs.append(valid_acc)
         
+        if valid_acc > best_valid_acc:
+            best_valid_acc = valid_acc
+            torch.save(policy.state_dict(),f'policy_{problem}.pkl')
         print(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}" )
-    
-    torch.save(policy.state_dict(),f'policy_{problem}.pkl')
+
+    #torch.save(policy.state_dict(),f'policy_{problem}.pkl')
 
 
 

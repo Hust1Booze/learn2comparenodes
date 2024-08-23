@@ -43,7 +43,7 @@ class GNNPolicy(torch.nn.Module):
     def __init__(self):
         super().__init__()
         
-        self.emb_size = emb_size = 32 #uniform node feature embedding dim
+        self.emb_size = emb_size = 64 #default 32 #uniform node feature embedding dim
         
         hidden_dim1 = 8
         hidden_dim2 = 4
@@ -89,8 +89,14 @@ class GNNPolicy(torch.nn.Module):
         self.conv1 = GraphConv((emb_size, emb_size), hidden_dim1 )
         self.conv2 = GraphConv((hidden_dim1, hidden_dim1), hidden_dim2 )
         self.conv3 = GraphConv((hidden_dim2, hidden_dim2), hidden_dim3 )
+
+        self.conv1_ = GraphConv((emb_size, emb_size), emb_size )
+        self.conv2_ = GraphConv((emb_size, emb_size), emb_size )
+        self.conv3_ = GraphConv((emb_size, emb_size), emb_size )
         
         self.convs = [ self.conv1, self.conv2, self.conv3 ]
+
+        self.convs_ = [ self.conv1_, self.conv2_, self.conv3_ ]
         
         out_size = hidden_dim3 if len(self.convs)==3 else emb_size
         
@@ -142,15 +148,31 @@ class GNNPolicy(torch.nn.Module):
                       batch.edge_attr_t,
                       batch.variable_features_t,
                       batch.bounds_t)
-        
+        try:
+            graph_root = (batch.constraint_features_root,
+                      batch.edge_index_root, 
+                      batch.edge_attr_root,
+                      batch.variable_features_root,
+                      batch.bounds_root,
+                      batch.constraint_features_root_batch,
+                      batch.variable_features_root_batch)
+        except AttributeError:
+             graph_root = None
         if inv:
             graph0, graph1 = graph1, graph0
         
+
+
+        if graph_root is not None:
+            embd0 = self.forward_graph_cl(*graph0) #concatenation of averages variable/constraint features after conv 
+            embd1 = self.forward_graph_cl(*graph1)
+            embd_root = self.forward_graph_cl(*graph_root)
+            
+            return embd0, embd1, embd_root
+        
         score0 = self.forward_graph(*graph0) #concatenation of averages variable/constraint features after conv 
         score1 = self.forward_graph(*graph1)
-        
         #return self.final_mlp(-score0 + score1).squeeze(1)
-        
         return torch.sigmoid(-score0+score1)
         
         
@@ -211,7 +233,64 @@ class GNNPolicy(torch.nn.Module):
         return torch.linalg.norm(variable_avg, dim=1) + torch.linalg.norm(constraint_avg, dim=1) + torch.linalg.norm(bbounds, dim=1)
     
 
+
+       
+    def forward_graph_cl(self, constraint_features, edge_indices, edge_features, 
+                       variable_features, bbounds, constraint_batch=None, variable_batch=None):
+
+        
+        #Assume edge indice var to cons, constraint_mask of shape [Nconvs]              
+        variable_features = self.var_embedding(variable_features)
+        constraint_features = self.cons_embedding(constraint_features)
+        edge_features = self.edge_embedding(edge_features)
+        bbounds = self.bounds_embedding(bbounds)
+        
+        
+        edge_indices_reversed = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
+        
+         
+        for conv in self.convs_:
+            
+            #Var to cons
+            constraint_features_next = F.relu(conv((variable_features, constraint_features), 
+                                              edge_indices,
+                                              edge_weight=edge_features,
+                                              size=(variable_features.size(0), constraint_features.size(0))))
+            
+            #cons to var 
+            variable_features = F.relu(conv((constraint_features, variable_features), 
+                                      edge_indices_reversed,
+                                      edge_weight=edge_features,
+                                      size=(constraint_features.size(0), variable_features.size(0))))
+            
+            constraint_features = constraint_features_next
+            
+        
+        if constraint_batch is not None:
+        
+            constraint_avg = torch_geometric.nn.pool.avg_pool_x(constraint_batch, 
+                                                                   constraint_features,
+                                                                   constraint_batch)[0]
+            variable_avg = torch_geometric.nn.pool.avg_pool_x(variable_batch, 
+                                                                 variable_features,
+                                                                 variable_features)[0]
+        else:
+            constraint_avg = torch.mean(constraint_features, axis=0, keepdim=True)
+            variable_avg = torch.mean(variable_features, axis=0, keepdim=True)
+            
+        #return torch.cat((variable_avg, constraint_avg, bbounds), dim=1)
+        #return torch.linalg.norm(variable_avg, dim=1) + torch.linalg.norm(constraint_avg, dim=1) + torch.linalg.norm(bbounds, dim=1)
+        return variable_avg
+
     
+    def cal_sim(self, g, g_root):
+
+        embd = self.forward_graph_cl(*g)
+        embd_root = self.forward_graph_cl(*g_root)
+
+        score  = F.cosine_similarity(embd_root, embd)
+
+        return score
 
 
 

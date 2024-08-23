@@ -22,7 +22,7 @@ def load_src(name, fpath):
 
 load_src("data_type", "../learning/data_type.py" )
 
-from data_type import BipartiteGraphPairData
+from data_type import BipartiteGraphPairData, BipartiteGraphPairData_with_node
 
 
 class CompFeaturizerSVM():
@@ -106,7 +106,7 @@ class CompFeaturizer():
         triplet = self.get_triplet_tensors(model, node1, node2, comp_res)
         
         if self.with_root_info:
-            return BipartiteGraphPairData(*triplet[0], *triplet[1],*triplet[2], triplet[3])
+            return BipartiteGraphPairData_with_node(*triplet[0], *triplet[1],*triplet[2], triplet[3])
         else:
             return BipartiteGraphPairData(*triplet[0], *triplet[1], triplet[2])
     
@@ -179,10 +179,10 @@ class CompFeaturizer():
         
         var_attributes0, cons_block_idxs0 = graphidx2graphdata[g0_idx]
         var_attributes1, cons_block_idxs1 = graphidx2graphdata[g1_idx]
-
+        
         if self.with_root_info:
             var_attributes_root, cons_block_idxs_root = graphidx2graphdata[g_root_idx]
-            g_data = self._get_graph_pair_data(var_attributes0, 
+            g_data = self._get_graph_pair_data_with_root(var_attributes0, 
                                             var_attributes1, 
                                             var_attributes_root,
                                                             
@@ -203,7 +203,7 @@ class CompFeaturizer():
                 bounds1[1], bounds1[0] = bounds1
                 bounds_root[1], bounds_root[0] = bounds_root
 
-            return self._to_triplet_tensors(g_data, node1.getDepth(), node2.getDepth(),root_node.getDepth(), bounds0, bounds1, bounds_root, self.LP_feature_recorder.device)
+            return self._to_triplet_tensors_with_root(g_data, node1.getDepth(), node2.getDepth(), root_node.getDepth(), bounds0, bounds1, bounds_root, self.LP_feature_recorder.device)
         else:
             g_data = self._get_graph_pair_data(var_attributes0, 
                                             var_attributes1, 
@@ -232,7 +232,7 @@ class CompFeaturizer():
         g2 = self._get_graph_data(var_attributes1, cons_block_idxs1, all_conss_blocks, all_conss_blocks_features)
      
         return list(zip(g1,g2)) + [comp_res]
-    def _get_graph_pair_data(self, var_attributes0, var_attributes1,var_attributes_root, cons_block_idxs0, cons_block_idxs1, cons_block_idxs_root, all_conss_blocks, all_conss_blocks_features, comp_res ):
+    def _get_graph_pair_data_with_root(self, var_attributes0, var_attributes1,var_attributes_root, cons_block_idxs0, cons_block_idxs1, cons_block_idxs_root, all_conss_blocks, all_conss_blocks_features, comp_res ):
         
         g1 = self._get_graph_data(var_attributes0, cons_block_idxs0, all_conss_blocks, all_conss_blocks_features)
         g2 = self._get_graph_data(var_attributes1, cons_block_idxs1, all_conss_blocks, all_conss_blocks_features)
@@ -288,7 +288,7 @@ class CompFeaturizer():
         
         return (g1,g2,y)
     
-    def _to_triplet_tensors(self, g_data, depth0, depth1, depth_root, bounds0, bounds1, bound_root, device ):
+    def _to_triplet_tensors_with_root(self, g_data, depth0, depth1, depth_root, bounds0, bounds1, bound_root, device ):
         
         variable_features = g_data[0]
         constraint_features = g_data[1]

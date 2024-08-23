@@ -33,7 +33,7 @@ def distribute(n_instance, n_cpu):
     return res
 
 
-def get_nodesels2models(nodesels, instance, problem, normalize, device):
+def get_nodesels2models(nodesels, instance, problem, normalize, device, with_root_info = False):
     
     res = dict()
     nodesels2nodeselectors = dict()
@@ -77,7 +77,8 @@ def get_nodesels2models(nodesels, instance, problem, normalize, device):
                                                    feature_normalizor,
                                                    use_trained_gnn=True,
                                                    sel_policy=sel_policy,
-                                                   n_primal=n_primal)
+                                                   n_primal=n_primal,
+                                                   with_root_info= with_root_info)
                 fr = LPFeatureRecorder(model, device)
                 comp.set_LP_feature_recorder(fr)
 
@@ -193,7 +194,7 @@ def solve_and_record_default(problem, instance, verbose):
 
 #take a list of nodeselectors to evaluate, a list of instance to test on, and the 
 #problem type for printing purposes
-def record_stats(nodesels, instances, problem, device, normalize, verbose=False, default=True):
+def record_stats(nodesels, instances, problem, device, normalize, verbose=False, default=True, with_root_info = False):
     
 
     for instance in instances:       
@@ -203,7 +204,7 @@ def record_stats(nodesels, instances, problem, device, normalize, verbose=False,
             solve_and_record_default(problem, instance, verbose)
         
         
-        nodesels2models, nodesels2nodeselectors = get_nodesels2models(nodesels, instance, problem, normalize, device)
+        nodesels2models, nodesels2nodeselectors = get_nodesels2models(nodesels, instance, problem, normalize, device, with_root_info = with_root_info)
         
         for nodesel in nodesels:  
             

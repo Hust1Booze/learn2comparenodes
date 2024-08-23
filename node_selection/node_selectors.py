@@ -21,7 +21,7 @@ from data_type import BipartiteGraphPairData
 from model import GNNPolicy, RankNet
 from line_profiler import LineProfiler
 from joblib import dump, load
-
+import torch.nn.functional as F
 
 
 class CustomNodeSelector(Nodesel):
@@ -336,7 +336,7 @@ class OracleNodeSelectorEstimator_SVM(CustomNodeSelector):
     
 class OracleNodeSelectorEstimator(CustomNodeSelector):
     
-    def __init__(self, problem, comp_featurizer, device, feature_normalizor, n_primal=2, use_trained_gnn=True, sel_policy=''):
+    def __init__(self, problem, comp_featurizer, device, feature_normalizor, n_primal=2, use_trained_gnn=True, sel_policy='', with_root_info = False):
         super().__init__(sel_policy=sel_policy)
         
         
@@ -365,6 +365,7 @@ class OracleNodeSelectorEstimator(CustomNodeSelector):
         
         self.scores = dict()
         
+        self.with_root_info = with_root_info
         
         
     def set_LP_feature_recorder(self, LP_feature_recorder):
@@ -407,21 +408,39 @@ class OracleNodeSelectorEstimator(CustomNodeSelector):
             if n_idx in self.scores:
                 comp_scores[comp_idx] = self.scores[n_idx]
             else:
+                if not self.with_root_info:
+                    _time, g =  self.comp_featurizer.get_graph_for_inf(self.model, node)
+                    
+                    self.fe_time += _time
 
-                _time, g =  self.comp_featurizer.get_graph_for_inf(self.model, node)
-                
-                self.fe_time += _time
+                    
+                    start = time.time()
+                    g = self.feature_normalizor(*g)[:-1]
+                    self.fn_time += (time.time() - start)
+                    
+                    start = time.time()
+                    score = self.policy.forward_graph(*g).item()
+                    self.scores[n_idx] = score 
+                    comp_scores[comp_idx] = score
+                    self.inference_time += (time.time() - start)
+                else:
+                    _time, g =  self.comp_featurizer.get_graph_for_inf(self.model, node)
+                    root_node = self.model.getRootNode()
+                    _time2, g_root =  self.comp_featurizer.get_graph_for_inf(self.model, root_node)
+                    self.fe_time += (_time + _time2)
 
-                
-                start = time.time()
-                g = self.feature_normalizor(*g)[:-1]
-                self.fn_time += (time.time() - start)
-                
-                start = time.time()
-                score = self.policy.forward_graph(*g).item()
-                self.scores[n_idx] = score 
-                comp_scores[comp_idx] = score
-                self.inference_time += (time.time() - start)
+                    
+                    start = time.time()
+                    g = self.feature_normalizor(*g)[:-1]
+                    g_root = self.feature_normalizor(*g_root)[:-1]
+                    self.fn_time += (time.time() - start)
+                    
+                    start = time.time()
+                    score = self.policy.cal_sim(g,g_root).item()
+                    self.scores[n_idx] = score 
+                    comp_scores[comp_idx] = score
+                    self.inference_time += (time.time() - start)                    
+
                 
         self.inf_counter += 1
         

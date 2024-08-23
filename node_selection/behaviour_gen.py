@@ -63,7 +63,8 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         
         #make it bad to generate more data !
         if comp_type in [-1,1]:
-            comp_res = -1 if comp_res == 1 else 1
+            if random.random() < 0.1: 
+                comp_res = -1 if comp_res == 1 else 1
         else:
             comp_res = 0
             
@@ -144,10 +145,10 @@ if __name__ == "__main__":
     with_root_info = True # this to save root node info for constrastive learning 
     
     oracle = 'optimal_plunger'
-    problem = 'GISP'
-    data_partitions = ['train', 'valid'] #dont change
+    problem = 'GISP'#'GISP'
+    data_partitions =['train', 'test'] #dont change
 
-    n_cpu = 10
+    n_cpu = 16
     n_instance = -1
     device = 'cpu'
     
@@ -196,7 +197,7 @@ if __name__ == "__main__":
         
         n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.2*n_instance)
 
-        #n_keep = 1 # for debug
+        n_keep = 3000 # for
         
         instances = list(Path(os.path.join(os.path.dirname(__file__), 
                                            f"../problem_generation/data/{problem}/{data_partition}")).glob("*.lp"))

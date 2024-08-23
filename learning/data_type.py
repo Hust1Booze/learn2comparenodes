@@ -41,7 +41,7 @@ class BipartiteGraphPairData(torch_geometric.data.Data):
         else:
             return super().__inc__(key, value, *args, **kwargs)
 
-class BipartiteGraphPairData(torch_geometric.data.Data):
+class BipartiteGraphPairData_with_node(torch_geometric.data.Data):
     """
     This class encode a pair of node bipartite graphs observation, s is graph0, t is graph1 
     """
@@ -71,9 +71,11 @@ class BipartiteGraphPairData(torch_geometric.data.Data):
         for those entries (edge index, candidates) for which this is not obvious.
         """
         if key == 'edge_index_s':
-            return torch.tensor([[self.variable_features_s.size(0)], [self.constraint_features_s.size(0)], [self.constraint_features_root.size(0)]])
+            return torch.tensor([[self.variable_features_s.size(0)], [self.constraint_features_s.size(0)]])
         elif key == 'edge_index_t':
-            return torch.tensor([[self.variable_features_t.size(0)], [self.constraint_features_t.size(0)], [self.constraint_features_root.size(0)]])
+            return torch.tensor([[self.variable_features_t.size(0)], [self.constraint_features_t.size(0)]])
+        elif key == 'edge_index_root':
+            return torch.tensor([[self.variable_features_root.size(0)], [self.constraint_features_root.size(0)]])
         else:
             return super().__inc__(key, value, *args, **kwargs)
         
