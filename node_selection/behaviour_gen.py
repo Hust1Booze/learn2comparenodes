@@ -63,8 +63,8 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         
         #make it bad to generate more data !
         if comp_type in [-1,1]:
-            if random.random() < 0.1: 
-                comp_res = -1 if comp_res == 1 else 1
+            #if random.random() < 0.1: 
+            comp_res = -1 if comp_res == 1 else 1
         else:
             comp_res = 0
             
