@@ -82,6 +82,7 @@ class CompFeaturizer():
         self.instance_name = instance_name
         self.save_dir = save_dir
         self.with_root_info = with_root_info
+        #print(f'with_root_info:{self.with_root_info}')
         
     def set_save_dir(self, save_dir):
         self.save_dir = save_dir

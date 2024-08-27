@@ -15,13 +15,14 @@ from pathlib import Path
 from model import GNNPolicy
 from data_type import GraphDataset
 from utils import process
+import datetime
 
 if __name__ == "__main__":
     debug_model = True
     with_root_info = True
-    problem = "GISP"#"GISP" "WPMS"
-    lr = 0.001
-    n_epoch = 10
+    problem = "WPMS"#"GISP" "WPMS"
+    lr = 0.005
+    n_epoch = 2
     n_sample = -1
     patience = 10
     early_stopping = 20
@@ -68,7 +69,7 @@ if __name__ == "__main__":
                                                             f"../node_selection/data/{problem}/train")).glob("*.pt") ][:n_sample]
     
     valid_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
-                                                            f"../node_selection/data/{problem}/valid")).glob("*.pt") ][:int(0.2*n_sample if n_sample != -1 else -1)]
+                                                            f"../node_selection/data/{problem}/test")).glob("*.pt") ][:int(0.2*n_sample if n_sample != -1 else -1)]
     if with_root_info:
         train_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
                                                                 f"../node_selection/data/{problem}/train_cl")).glob("*.pt") ][:n_sample]
@@ -164,12 +165,16 @@ if __name__ == "__main__":
         valid_losses.append(valid_loss)
         valid_accs.append(valid_acc)
         
-        if valid_acc > best_valid_acc:
-            best_valid_acc = valid_acc
-            torch.save(policy.state_dict(),f'policy_{problem}.pkl')
+        # if valid_acc > best_valid_acc:
+        #     best_valid_acc = valid_acc
+        #     torch.save(policy.state_dict(),f'policy_{problem}.pkl')
+        #     print('save model')
         print(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}" )
 
-    #torch.save(policy.state_dict(),f'policy_{problem}.pkl')
+    torch.save(policy.state_dict(),f'policy_{problem}.pkl')
+    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    torch.save(policy.state_dict(),f'pkls/policy_{problem}_{current_time}.pkl')
+    print(f'Model saved at pkls/policy_{problem}_{current_time}.pkl')
 
 
 

@@ -20,10 +20,10 @@ if __name__ == "__main__":
     n_instance = -1
     nodesels = ['gnn_dummy_nprimal=2'] #['ranknet_dummy_nprimal=2']
     
-    problem = 'GISP'
+    problem = 'WPMS' #'GISP' 'WPMS' 'FCMCNF'
     normalize = True
     
-    data_partition = 'transfer' #'test' #'transfer'
+    data_partition = 'test' #'test' #'transfer'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     verbose = False
     on_log = False
@@ -100,7 +100,7 @@ if __name__ == "__main__":
                                           normalize=normalize,
                                           verbose=verbose,
                                           default=default,
-                                          with_root_info = False))
+                                          with_root_info = True))
                     for p,(p1,p2) in enumerate(distribute(n_instance, n_cpu)) ]  
 
 
