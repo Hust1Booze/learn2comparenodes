@@ -106,6 +106,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, with_roo
     # Run the optimizer
     model.optimize()
     print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons' )
+
     
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")
@@ -148,7 +149,7 @@ if __name__ == "__main__":
     problem = 'WPMS'#'GISP' 'WPMS'
     data_partitions =['train', 'test'] #dont change
 
-    n_cpu = 8
+    n_cpu = 1
     n_instance = -1
     device = 'cpu'
     

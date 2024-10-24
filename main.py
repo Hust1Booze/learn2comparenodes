@@ -20,7 +20,7 @@ if __name__ == "__main__":
     n_instance = -1
     nodesels = ['gnn_dummy_nprimal=2'] #['ranknet_dummy_nprimal=2']
     
-    problem = 'WPMS' #'GISP' 'WPMS' 'FCMCNF'
+    problem = 'GISP' #'GISP' 'WPMS' 'FCMCNF'
     normalize = True
     
     data_partition = 'test' #'test' #'transfer'

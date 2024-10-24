@@ -96,8 +96,8 @@ class GNNPolicy(torch.nn.Module):
         
         self.convs = [ self.conv1, self.conv2, self.conv3 ]
 
-        self.convs_ = [ self.conv1_, self.conv2_, self.conv3_ ]
-        
+        #self.convs_ = [ self.conv1_, self.conv2_, self.conv3_ ]
+        self.convs_ = [ self.conv1_, self.conv2_]
         out_size = hidden_dim3 if len(self.convs)==3 else emb_size
         
         self.final_mlp = torch.nn.Sequential( 
