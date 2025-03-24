@@ -16,13 +16,16 @@ load_src("model", "../learning/model.py" )
 import torch
 import time
 import numpy as np
-from pyscipopt import Nodesel
+from pyscipopt import Nodesel,Model
 from data_type import BipartiteGraphPairData
 from model import GNNPolicy, RankNet
 from line_profiler import LineProfiler
 from joblib import dump, load
 
 
+import torch
+from pyscipopt import Nodesel
+# from tripartite_graph_builder import construct_tripartite_graph  # 确保导入 TripartiteGraphData 构造函数
 
 class CustomNodeSelector(Nodesel):
 
@@ -35,6 +38,7 @@ class CustomNodeSelector(Nodesel):
         
     def nodeselect(self):
         
+
         self.sel_counter += 1
         policy = self.sel_policy
         
@@ -50,6 +54,8 @@ class CustomNodeSelector(Nodesel):
             res = self.random_nodeselect()
         else:
             res = {"selnode": self.model.getBestNode()}
+
+        
             
         return res
     
@@ -58,6 +64,7 @@ class CustomNodeSelector(Nodesel):
         self.comp_counter += 1
         policy = self.comp_policy
         
+
         if policy == 'estimate':
             res = self.estimate_nodecomp(node1, node2)
         elif policy == 'dfs':
@@ -70,7 +77,7 @@ class CustomNodeSelector(Nodesel):
             res = self.random_nodecomp(node1, node2)
         else:
             res = 0
-            
+        
         return res
     
     #BFS
@@ -183,6 +190,9 @@ class OracleNodeSelectorAbdel(CustomNodeSelector):
         self.sel_policy = sel_policy
         self.inf_counter  = 0
         
+            
+    def nodeselect(self):
+        return super().nodeselect()
     
     def nodecomp(self, node1, node2, return_type=False):
         
@@ -426,3 +436,5 @@ class OracleNodeSelectorEstimator(CustomNodeSelector):
         self.inf_counter += 1
         
         return -1 if comp_scores[0] > comp_scores[1] else 1
+
+

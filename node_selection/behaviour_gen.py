@@ -25,9 +25,9 @@ from functools import partial
 from node_selectors import OracleNodeSelectorAbdel
 from recorders import LPFeatureRecorder, CompFeaturizer, CompFeaturizerSVM
 from torch.multiprocessing import Process, set_start_method
-
-
-
+from tripartite_graph_builder import construct_tripartite_graph  # 确保导入 TripartiteGraphData 构造函数
+import torch
+from branch_rule import SamplingAgent,StrongBranchingRule,MostInfBranchRule
 
 class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
     
@@ -41,31 +41,55 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         self.comp_behaviour_saver.set_LP_feature_recorder(LP_feature_recorder)
 
         
+    def nodeselect(self):
         
+        # 1. 构造三分图数据
+        #constraint_features,variable_features,leaf_features,edge_index_cv,edge_attr_cv,edge_index_vl,edge_attr_vl = construct_tripartite_graph(self.model)
+        tripartiteGraphData =  construct_tripartite_graph(self.model)
+        #tripartiteGraphData =  TripartiteGraphData(None,None,None,None,None,None,None)
+        # 2. 存储数据 (用于训练 GNN)
+        file_path = f"./tripartite_step_{self.sel_counter}.pt"
+
+        
+
+        select_node = super().nodeselect()
+
+        select_node_number = select_node['selnode'].getNumber()
+        leaves, children, siblings = self.model.getOpenNodes()
+        open_nodes = leaves + children + siblings
+
+        tripartiteGraphData.y = select_node_number
+        torch.save(tripartiteGraphData, file_path)
+        
+        return select_node
+
+    
     def nodecomp(self, node1, node2):
         comp_res, comp_type = super().nodecomp(node1, node2, return_type=True)
+
+        self.counter += 1
         
-        if comp_type in [-1,1]:
-            self.comp_behaviour_saver.save_comp(self.model, 
-                                                node1, 
-                                                node2,
-                                                comp_res,
-                                                self.counter) 
+        # if comp_type in [-1,1]:
+        #     self.comp_behaviour_saver.save_comp(self.model, 
+        #                                         node1, 
+        #                                         node2,
+        #                                         comp_res,
+        #                                         self.counter) 
             
-            self.comp_behaviour_saver_svm.save_comp(self.model, 
-                                                node1, 
-                                                node2,
-                                                comp_res,
-                                                self.counter) 
+        #     self.comp_behaviour_saver_svm.save_comp(self.model, 
+        #                                         node1, 
+        #                                         node2,
+        #                                         comp_res,
+        #                                         self.counter) 
         
-            #print("saved comp # " + str(self.counter))
-            self.counter += 1
+        #     #print("saved comp # " + str(self.counter))
+        #     self.counter += 1
         
-        #make it bad to generate more data !
-        if comp_type in [-1,1]:
-            comp_res = -1 if comp_res == 1 else 1
-        else:
-            comp_res = 0
+        # #make it bad to generate more data !
+        # if comp_type in [-1,1]:
+        #     comp_res = -1 if comp_res == 1 else 1
+        # else:
+        #     comp_res = 0
             
         return comp_res
 
@@ -102,6 +126,24 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
                          536870911,  536870911)
 
 
+    # branchrule = SamplingAgent(
+    #     episode=0,
+    #     instance=instance,
+    #     seed=0,
+    #     exploration_policy='vanillafullstrong',
+    #     query_expert_prob=1)
+    branchrule = StrongBranchingRule(model)
+    model.includeBranchrule(
+        branchrule=branchrule,
+        name="Sampling branching rule", desc="",
+        priority=666666, maxdepth=-1, maxbounddist=1)
+    
+    # model.setBoolParam('branching/vanillafullstrong/integralcands', True)
+    # model.setBoolParam('branching/vanillafullstrong/scoreall', True)
+    # model.setBoolParam('branching/vanillafullstrong/collectscores', True)
+    # model.setBoolParam('branching/vanillafullstrong/donotbranch', True)
+    # model.setBoolParam('branching/vanillafullstrong/idempotent', True)
+    
     # Run the optimizer
     model.optimize()
     print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons' )
@@ -145,8 +187,8 @@ if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
     problem = 'GISP'
-    data_partitions = ['train', 'valid'] #dont change
-    n_cpu = 10
+    data_partitions = ['train'] #dont change
+    n_cpu = 1
     n_instance = -1
     device = 'cpu'
     
@@ -210,7 +252,7 @@ if __name__ == "__main__":
         
         
         try:
-            set_start_method('spawn')
+            set_start_method('spawn',force=True)
         except RuntimeError:
             ''
             
