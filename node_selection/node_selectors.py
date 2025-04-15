@@ -19,7 +19,7 @@ import numpy as np
 from pyscipopt import Nodesel,Model
 from data_type import BipartiteGraphPairData
 from model import GNNPolicy, RankNet
-from line_profiler import LineProfiler
+# from line_profiler import LineProfiler
 from joblib import dump, load
 
 
@@ -229,10 +229,16 @@ class OracleNodeSelectorAbdel(CustomNodeSelector):
     def is_sol_in_domaine(self, sol, node):
         #By partionionning, it is sufficient to only check what variable have
         #been branched and if sol is in [lb, up]_v for v a branched variable
+        branches = [[], [], []]  # 分别存 bvar, bound, btype
+
+        while node.getParent() is not None:
+            bvars, bounds, btypes = node.getParentBranchings()
+            branches[0] += bvars
+            branches[1] += bounds
+            branches[2] += btypes
+            node = node.getParent()
         
-        bvars, bbounds, btypes = node.getAncestorBranchings()
-        
-        for bvar, bbound, btype in zip(bvars, bbounds, btypes): 
+        for bvar, bbound, btype in zip(*branches): 
             if btype == 0:#LOWER BOUND
                 if sol[bvar] < bbound:
                     return False

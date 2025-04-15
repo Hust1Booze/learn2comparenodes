@@ -20,18 +20,19 @@ class TripartiteGraphData(torch_geometric.data.Data):
                  constraint_features=None, 
                  variable_features=None, 
                  leaf_features=None,  # 叶子节点特征
-                 leaf_idx = None,
+                 candidate_nodes = None,
                  
                  edge_index_cv=None, edge_attr_cv=None,  # 约束 <-> 变量
                  edge_index_vl=None, edge_attr_vl=None,  # 变量 <-> 叶子
                  
-                 bounds=None, depth=None, y=None): 
+                 bounds=None, depth=None, selnode=None, 
+                 cand_vars = None, branch_index = None): 
         super().__init__()
         
         self.constraint_features = constraint_features  # h^c
         self.variable_features = variable_features      # h^v
         self.leaf_features = leaf_features              # h^l (新增叶子节点特征)
-        self.leaf_idx = leaf_idx
+        self.candidate_nodes = candidate_nodes
 
         self.edge_index_cv = edge_index_cv  # 约束 <-> 变量
         self.edge_attr_cv = edge_attr_cv
@@ -41,7 +42,9 @@ class TripartiteGraphData(torch_geometric.data.Data):
         
         self.bounds = bounds
         self.depth = depth
-        self.y = y  # 标签 (如果需要)
+        self.selnode = selnode  # 标签 (如果需要)
+        self.cand_vars = cand_vars
+        self.branch_index = branch_index
         
     def __inc__(self, key, value, *args, **kwargs):
         """
@@ -53,6 +56,8 @@ class TripartiteGraphData(torch_geometric.data.Data):
             return torch.tensor([[self.leaf_features.size(0)], [self.variable_features.size(0)]])  # 变量 <-> 叶子
         else:
             return super().__inc__(key, value, *args, **kwargs)
+    def _features(self):
+        return  self.constraint_features, self.variable_features, self.leaf_features, self.edge_index_cv, self.edge_attr_cv, self.edge_index_vl, self.edge_attr_vl  
         
 
 class BipartiteGraphPairData(torch_geometric.data.Data):

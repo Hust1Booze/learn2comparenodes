@@ -11,7 +11,9 @@ import utilities
 import pyscipopt as scip
 from pyscipopt import Model, Branchrule, SCIP_RESULT
 import numpy as np
-
+import torch
+import time
+from tripartite_graph_builder import construct_tripartite_graph 
 
 class SamplingAgent(scip.Branchrule):
 
@@ -82,11 +84,13 @@ class SamplingAgent(scip.Branchrule):
 
 class StrongBranchingRule(scip.Branchrule):
 
-    def __init__(self, scip):
+    def __init__(self, scip,save_dir):
         self.scip = scip
-
+        self.save_dir = save_dir
+        self.count = 1
     def branchexeclp(self, allowaddcons):
-
+        cur_node_number = self.scip.getCurrentNode().getNumber()
+        #print(f"Node: {cur_node_number} , !!!! in branch .")
         branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.scip.getLPBranchCands()
 
         # Initialise scores for each variable
@@ -124,10 +128,12 @@ class StrongBranchingRule(scip.Branchrule):
 
             # In the case of an LP error handle appropriately (for this example we just break the loop)
             if lperror:
+                #print(f"Node: {cur_node_number} , !!!!lperror.")
                 break
 
             # In the case of both infeasible sub-problems cutoff the node
             if downinf and upinf:
+                #print(f"Node: {cur_node_number} , !!!!cutoff.")
                 return {"result": SCIP_RESULT.CUTOFF}
 
             # Calculate the gains for each up and down node that strong branching explored
@@ -163,7 +169,19 @@ class StrongBranchingRule(scip.Branchrule):
         # Branch on the variable with the largest score
         down_child, eq_child, up_child = self.model.branchVarVal(
             branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
+        
+        if not os.path.exists(self.save_dir) :
+                os.makedirs(self.save_dir , exist_ok=True)
 
+        current_time = time.time()
+
+        file_path = self.save_dir + f"/{current_time:.4f}_node_{cur_node_number}_branched.pt"
+        cand_vars = list([ str_var for var in branch_cands for str_var in [str(var)] ])
+        tripartiteGraphData =  construct_tripartite_graph(self.model)
+        tripartiteGraphData.cand_vars = cand_vars
+        tripartiteGraphData.branch_index = best_cand_idx
+        print(f"Node: {cur_node_number} , !!!!branched.")
+        torch.save(tripartiteGraphData, file_path)
         # Update the bounds of the down node and up node. Some cols might not exist due to pricing
         if self.scip.allColsInLP():
             if down_child is not None and down_bounds[best_cand_idx] is not None:

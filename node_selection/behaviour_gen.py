@@ -20,6 +20,7 @@ import sys
 import random
 import numpy as np
 import pyscipopt.scip as sp
+from pyscipopt import SCIP_EVENTTYPE,Eventhdlr
 from pathlib import Path 
 from functools import partial
 from node_selectors import OracleNodeSelectorAbdel
@@ -28,15 +29,15 @@ from torch.multiprocessing import Process, set_start_method
 from tripartite_graph_builder import construct_tripartite_graph  # 确保导入 TripartiteGraphData 构造函数
 import torch
 from branch_rule import SamplingAgent,StrongBranchingRule,MostInfBranchRule
-
+import time
 class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
     
-    def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm):
+    def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,save_dir):
         super().__init__(oracle_type)
         self.counter = 0
         self.comp_behaviour_saver = comp_behaviour_saver
         self.comp_behaviour_saver_svm = comp_behaviour_saver_svm
-    
+        self.save_dir = save_dir
     def set_LP_feature_recorder(self, LP_feature_recorder):
         self.comp_behaviour_saver.set_LP_feature_recorder(LP_feature_recorder)
 
@@ -48,17 +49,21 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         tripartiteGraphData =  construct_tripartite_graph(self.model)
         #tripartiteGraphData =  TripartiteGraphData(None,None,None,None,None,None,None)
         # 2. 存储数据 (用于训练 GNN)
-        file_path = f"./tripartite_step_{self.sel_counter}.pt"
-
-        
 
         select_node = super().nodeselect()
-
+        if select_node['selnode'] is None:
+            return select_node
         select_node_number = select_node['selnode'].getNumber()
         leaves, children, siblings = self.model.getOpenNodes()
         open_nodes = leaves + children + siblings
 
-        tripartiteGraphData.y = select_node_number
+        tripartiteGraphData.selnode = select_node_number
+        if not os.path.exists(self.save_dir) :
+            os.makedirs(self.save_dir , exist_ok=True)
+        current_time = time.time()
+
+        file_path = self.save_dir + f"/{current_time:.4f}_node_{select_node_number}_selected.pt"
+        print(f"Node: {select_node_number} , !!!!select node.")
         torch.save(tripartiteGraphData, file_path)
         
         return select_node
@@ -94,6 +99,48 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         return comp_res
 
 
+class InfeasibleCounter(Eventhdlr):
+    def __init__(self, model, save_dir):
+        Eventhdlr.__init__(model)
+        self.count = 0
+        self.model = model
+        self.save_dir = save_dir
+        if not os.path.exists(self.save_dir) :
+            os.makedirs(self.save_dir , exist_ok=True)
+
+    def eventinit(self):
+        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+
+    def eventexit(self):
+        self.model.dropEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+
+    def eventexec(self, event):
+        self.count += 1
+        node = self.model.getCurrentNode()
+        node_number = node.getNumber()
+        print(f"Node: {node_number} , {event.getName()}")
+
+        if(event.getName() == 'BESTSOLFOUND'):
+            current_time = time.time()
+
+            file_path = self.save_dir + f"/{current_time:.4f}_bestsolfound.pt"
+            data = {}
+            torch.save(data, file_path)
+        if(event.getName() == 'NODEINFEASIBLE'):
+            current_time = time.time()
+
+            file_path = self.save_dir + f"/{current_time:.4f}_nodeinfeasible.pt"
+            data = {}
+            torch.save(data, file_path)
+        # if(event.getName() == 'NODEBRANCHED'):
+        #     print(f"Node: {node_number} , {event.getName()}")
+        # elif(event.getName() == 'NODEBRANCHED')
+
+        
+
+
 
 def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
     
@@ -111,49 +158,35 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
     model.setParam('constraints/linear/upgrade/xor', 0)
     model.setParam('constraints/linear/upgrade/varbound', 0)
     
-    
+    #model.setParam("display/verblevel", 5)
+    #model.setIntParam("display/freq", 1)
+
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
     
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
     comp_behaviour_saver_svm = CompFeaturizerSVM(model, f"{save_dir_svm}", instance_name=str(instance).split("/")[-1])
     
-    oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm)
+    save_dir = save_dir + str(instance).split("/")[-1]
+    oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,save_dir)
     oracle_ns.setOptsol(optsol)
-    oracle_ns.set_LP_feature_recorder(LPFeatureRecorder(model, device))
+    #oracle_ns.set_LP_feature_recorder(LPFeatureRecorder(model, device))
         
     
     model.includeNodesel(oracle_ns, "oracle_recorder", "testing",
                          536870911,  536870911)
 
-
-    # branchrule = SamplingAgent(
-    #     episode=0,
-    #     instance=instance,
-    #     seed=0,
-    #     exploration_policy='vanillafullstrong',
-    #     query_expert_prob=1)
-    branchrule = StrongBranchingRule(model)
+    branchrule = StrongBranchingRule(model,save_dir)
     model.includeBranchrule(
         branchrule=branchrule,
         name="Sampling branching rule", desc="",
         priority=666666, maxdepth=-1, maxbounddist=1)
     
-    # model.setBoolParam('branching/vanillafullstrong/integralcands', True)
-    # model.setBoolParam('branching/vanillafullstrong/scoreall', True)
-    # model.setBoolParam('branching/vanillafullstrong/collectscores', True)
-    # model.setBoolParam('branching/vanillafullstrong/donotbranch', True)
-    # model.setBoolParam('branching/vanillafullstrong/idempotent', True)
+    infeasible_Counter = InfeasibleCounter(model,save_dir)
+    model.includeEventhdlr(infeasible_Counter, "infeasible_Counter", "Event handler when nodes are pouned")
     
     # Run the optimizer
     model.optimize()
     print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons' )
-    
-    with open("nnodes.csv", "a+") as f:
-        f.write(f"{model.getNNodes()},")
-        f.close()
-    with open("times.csv", "a+") as f:
-        f.write(f"{model.getSolvingTime()},")
-        f.close()
         
     return 1
 
@@ -188,8 +221,8 @@ if __name__ == "__main__":
     oracle = 'optimal_plunger'
     problem = 'GISP'
     data_partitions = ['train'] #dont change
-    n_cpu = 1
-    n_instance = -1
+    n_cpu = 4
+    n_instance = 4
     device = 'cpu'
     
     with open("nnodes.csv", "w") as f:
@@ -244,7 +277,7 @@ if __name__ == "__main__":
         processes = [  Process(name=f"worker {p}", 
                                         target=partial(run_episodes,
                                                         oracle_type=oracle,
-                                                        instances=instances[ p1 : p2], 
+                                                        instances=instances[p1 : p2], 
                                                         save_dir=save_dir,
                                                         save_dir_svm=save_dir_svm,
                                                         device=device))
@@ -260,13 +293,14 @@ if __name__ == "__main__":
         b = list(map(lambda p: p.join(), processes)) #join processes
         
             
-    nnodes = np.genfromtxt("nnodes.csv", delimiter=",")[:-1]
-    times = np.genfromtxt("times.csv", delimiter=",")[:-1]
+    print("generate done")
+    # nnodes = np.genfromtxt("nnodes.csv", delimiter=",")[:-1]
+    # times = np.genfromtxt("times.csv", delimiter=",")[:-1]
         
-    print(f"Mean number of node created  {np.mean(nnodes)}")
-    print(f"Mean solving time  {np.mean(times)}")
-    print(f"Median number of node created  {np.median(nnodes)}")
-    print(f"Median solving time  {np.median(times)}")
+    # print(f"Mean number of node created  {np.mean(nnodes)}")
+    # print(f"Mean solving time  {np.mean(times)}")
+    # print(f"Median number of node created  {np.median(nnodes)}")
+    # print(f"Median solving time  {np.median(times)}")
     
     
                          
