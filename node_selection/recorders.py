@@ -82,6 +82,7 @@ class CompFeaturizer():
         self.instance_name = instance_name
         self.save_dir = save_dir
         
+        
     def set_save_dir(self, save_dir):
         self.save_dir = save_dir
         return self
@@ -147,13 +148,6 @@ class CompFeaturizer():
         gpu_gpu = (time.time() - gpu_gpu)
             
         return gpu_gpu, g
-        
-        
-        
-        
-        
-        
-        
         
     
     

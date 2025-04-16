@@ -15,36 +15,65 @@ Created on Tue Oct 12 12:54:57 2021
 
 """
 
+
 import os
 import sys
 import random
 import numpy as np
 import pyscipopt.scip as sp
+from pyscipopt import SCIP_EVENTTYPE,Eventhdlr
 from pathlib import Path 
 from functools import partial
 from node_selectors import OracleNodeSelectorAbdel
 from recorders import LPFeatureRecorder, CompFeaturizer, CompFeaturizerSVM
 from torch.multiprocessing import Process, set_start_method
-
+import torch
+import time
 
 
 
 class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
     
-    def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm):
+    def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,save_dir):
         super().__init__(oracle_type)
         self.counter = 0
         self.comp_behaviour_saver = comp_behaviour_saver
         self.comp_behaviour_saver_svm = comp_behaviour_saver_svm
-    
+        self.save_dir = save_dir
+
     def set_LP_feature_recorder(self, LP_feature_recorder):
         self.comp_behaviour_saver.set_LP_feature_recorder(LP_feature_recorder)
 
+    def nodeselect(self):
         
+        select_node = super().nodeselect()
+        if select_node['selnode'] is None:
+            return select_node
+        select_node_number = select_node['selnode'].getNumber()
+        if select_node_number == 1:
+            gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, select_node['selnode'])
+            current_time = time.time()
+            file_path = self.save_dir + f"/{current_time:.4f}_origin_milp.pt"
+            torch.save(g, file_path)
+        leaves, children, siblings = self.model.getOpenNodes()
+        open_nodes = leaves + children + siblings
+
+        open_nodes_number = []
+        for open_node in open_nodes:
+            open_nodes_number.append(open_node.getNumber())
+        if not os.path.exists(self.save_dir) :
+            os.makedirs(self.save_dir , exist_ok=True)
+        current_time = time.time()
+
+        file_path = self.save_dir + f"/{current_time:.4f}_node_{select_node_number}_selected.pt"
+        print(f"Node: {select_node_number} , !!!!select node.")
+        torch.save(open_nodes_number, file_path)
+        
+        return select_node        
         
     def nodecomp(self, node1, node2):
         comp_res, comp_type = super().nodecomp(node1, node2, return_type=True)
-        
+        return comp_res
         if comp_type in [-1,1]:
             self.comp_behaviour_saver.save_comp(self.model, 
                                                 node1, 
@@ -67,7 +96,103 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         else:
             comp_res = 0
             
-        return comp_res
+        
+class InfeasibleCounter(Eventhdlr):
+    def __init__(self, model, save_dir,device):
+        Eventhdlr.__init__(model)
+        self.count = 0
+        self.model = model
+        self.save_dir = save_dir
+        self.device = device
+        varrs = model.getVars() # equal to variables nums in bipartite graph representation
+        original_conss = model.getConss()
+        self.varrs = varrs
+        self.original_conss = original_conss
+        self.var2idx = dict([ (str_var, idx) for idx, var in enumerate(self.varrs) for str_var in [str(var)]  ])
+
+        if not os.path.exists(self.save_dir) :
+            os.makedirs(self.save_dir , exist_ok=True)
+
+    def eventinit(self):
+        self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.NODEFOCUSED, self)
+
+    def eventexit(self):
+        self.model.dropEvent(SCIP_EVENTTYPE.NODESOLVED, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.BESTSOLFOUND, self)
+        self.model.catchEvent(SCIP_EVENTTYPE.NODEFOCUSED, self)
+
+    def eventexec(self, event):
+        self.count += 1
+        node = self.model.getCurrentNode()
+        node_number = node.getNumber()
+        print(f"Node: {node_number} , {event.getName()}")
+
+        if(event.getName() == 'BESTSOLFOUND'):
+            current_time = time.time()
+
+            file_path = self.save_dir + f"/{current_time:.4f}_bestsolfound.pt"
+            data = {}
+            torch.save(data, file_path)
+        if(event.getName() == 'NODEINFEASIBLE'):
+            current_time = time.time()
+
+            file_path = self.save_dir + f"/{current_time:.4f}_nodeinfeasible.pt"
+            data = {}
+            torch.save(data, file_path)
+        if(event.getName() == 'NODEFOCUSED'):
+            # branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
+            # last_branch_candidates = [str(cand) for cand in branch_cands]
+            print()
+        if(event.getName() == 'NODEBRANCHED'):
+            leaves, children, siblings = self.model.getOpenNodes()
+            open_nodes = leaves + children + siblings
+            branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
+
+            save_branch_info = False
+
+            open_nodes_number = []
+            for open_node in open_nodes:
+                open_nodes_number.append(open_node.getNumber())
+                if open_node.getParent().getNumber() == node_number:
+                    child_number = open_node.getNumber()
+                    print(f'chile node {child_number}')
+                    lb, ub = node.getLowerbound(), node.getEstimate()
+                    depth = node.getDepth()
+                    bvars, bbounds, btypes = open_node.getParentBranchings()
+                    for bvar, bbound, btype in zip(bvars, bbounds, btypes): 
+                        if str(bvar) in self.var2idx:
+                            var_idx = self.var2idx[str(bvar)]
+                        elif 't_'+str(bvar) in self.var2idx:
+                            var_idx = self.var2idx['t_' + str(bvar)]
+                        else:
+                            var_idx = self.var2idx[ '_'.join(str(bvar).split('_')[1:]) ] 
+                    
+                    if save_branch_info is False:
+                        cands_indexs = []
+                        current_time = time.time()
+                        file_path = self.save_dir + f"/{current_time:.4f}_branchinfo_{node_number}.pt"
+                        for i in range(npriocands):
+                            var = str(branch_cands[i])
+                            if var in self.var2idx:
+                                _var_idx = self.var2idx[var]
+                            elif var.startswith("t_") and var[2:] in self.var2idx:
+                                _var_idx = self.var2idx[var[2:]]
+                            else:
+                                print("error in save branch_cands info")
+                            cands_indexs.append(_var_idx) 
+                        info = {
+                            "candidate_indices": cands_indexs,
+                            "selected_var_index": var_idx
+                        }
+                        torch.save(info, file_path)
+                        save_branch_info = True
+                    child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]], device=self.device).float()
+                    current_time = time.time()
+                    file_path = self.save_dir + f"/{current_time:.4f}_branch_on_{node_number}_to_{child_number}.pt"
+                    torch.save(child_node, file_path)
+        
 
 
 
@@ -89,19 +214,22 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
     
     
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
-    
+
+    save_dir = save_dir + str(instance).split("/")[-1]
+
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
     comp_behaviour_saver_svm = CompFeaturizerSVM(model, f"{save_dir_svm}", instance_name=str(instance).split("/")[-1])
     
-    oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm)
+    oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,save_dir)
     oracle_ns.setOptsol(optsol)
     oracle_ns.set_LP_feature_recorder(LPFeatureRecorder(model, device))
         
     
     model.includeNodesel(oracle_ns, "oracle_recorder", "testing",
                          536870911,  536870911)
-
-
+    
+    infeasible_Counter = InfeasibleCounter(model,save_dir,device)
+    model.includeEventhdlr(infeasible_Counter, "infeasible_Counter", "Event handler when nodes are pouned")
     # Run the optimizer
     model.optimize()
     print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons' )
@@ -145,9 +273,9 @@ if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
     problem = 'GISP'
-    data_partitions = ['train', 'valid'] #dont change
-    n_cpu = 10
-    n_instance = -1
+    data_partitions = ['train'] #dont change
+    n_cpu = 1
+    n_instance = 1
     device = 'cpu'
     
     with open("nnodes.csv", "w") as f:
@@ -179,15 +307,15 @@ if __name__ == "__main__":
         save_dir = os.path.join(os.path.dirname(__file__), f'./data/{problem}/{data_partition}')
         save_dir_svm = os.path.join(os.path.dirname(__file__), f'./data_svm/{problem}/{data_partition}')
         
-        try:
-            os.makedirs(save_dir)
-        except FileExistsError:
-            ""
+        # try:
+        #     os.makedirs(save_dir)
+        # except FileExistsError:
+        #     ""
             
-        try:
-            os.makedirs(save_dir_svm)
-        except FileExistsError:
-            ""
+        # try:
+        #     os.makedirs(save_dir_svm)
+        # except FileExistsError:
+        #     ""
         
         n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.2*n_instance)
         
