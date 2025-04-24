@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, bnb_collate
 from torch_geometric.nn import GraphConv
-
+import random
 
 class GNNEncoder(torch.nn.Module):
     def __init__(self):
@@ -113,8 +113,8 @@ class DTModel(nn.Module):
     def __init__(self,d_model=32, n_heads=4, n_layers=4, dropout=0.1, type_vocab_size=6):
         super().__init__()
         self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
-        self.type_embedding = nn.Embedding(type_vocab_size, d_model)
-        self.pos_embedding = nn.Embedding(512, d_model)
+        self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=-1)
+        self.pos_embedding = nn.Embedding(10000, d_model) # support 10000 sequence length 
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
 
@@ -132,25 +132,64 @@ class DTModel(nn.Module):
             nn.Linear(d_model, 1)  # example: predict score or class
         )
 
-    def forward(self, batch_tokens, type_ids, attention_mask):
-        B, T = type_ids.shape
-        device = batch_tokens[0].device
+        self.select_head = nn.Linear(d_model, 1)
+        self.branch_head = nn.Linear(d_model, 1)
 
-        # Convert all tokens to same dim via token_proj
-        projected_tokens = []
-        for token in batch_tokens:
-            if token.dim() == 2:
-                token = token.unsqueeze(-1)  # [B, 1, 1]
-            if token.size(-1) != 8:
-                token = F.pad(token.float(), (0, 8 - token.size(-1)))
-            projected_tokens.append(self.token_proj(token))
 
-        token_embeds = torch.stack(projected_tokens, dim=1)  # [B, T, D]
+    def generate_causal_mask(self, length, device):
+        return torch.triu(torch.ones(length, length, device=device), diagonal=1).bool()
+
+    def forward(self, batch_tokens, type_ids, attention_mask, actions, candidates):
+        B, T, D = batch_tokens.shape
+        device = batch_tokens.device
+
         type_embed = self.type_embedding(type_ids)
         pos_ids = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)
         pos_embed = self.pos_embedding(pos_ids)
 
-        x = token_embeds + type_embed + pos_embed
-        x = self.transformer(x, src_key_padding_mask=(attention_mask == 0))
-        out = self.output_head(x)  # [B, T, 1]
-        return out.squeeze(-1)  # [B, T]
+        x = batch_tokens + type_embed + pos_embed
+
+        select_loss = torch.tensor(0.0, device=device)
+        branch_loss = torch.tensor(0.0, device=device)
+
+        for b in range(B):
+            #for t in range(T):
+            valid_indices = [t for t in range(T) if type_ids[b, t].item() in [2, 4] and actions[b, t] >= 0]
+            if not valid_indices:
+                continue
+            t = random.choice(valid_indices)  # 只选一个位置
+
+            token_type = type_ids[b, t].item()
+            if token_type not in [2, 4] or actions[b, t] < 0:
+                continue
+
+            x_prefix = x[b:b+1, :t, :]  # [1, t+1, D]
+            causal_mask = self.generate_causal_mask(t, device)
+            pad_mask = attention_mask[b:b+1, :t] == 0
+
+            encoded = self.transformer(x_prefix)  # [1, t+1, D]
+
+            candidate_indices = candidates[b][t]
+            if isinstance(candidate_indices, torch.Tensor):
+                candidate_indices = candidate_indices.tolist()
+            if not isinstance(candidate_indices, list) or len(candidate_indices) == 0:
+                continue
+
+            candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
+            candidate_repr = encoded[0, candidate_tensor]  # [num_cand, D]
+
+            if token_type == 2:
+                logits = self.select_head(candidate_repr).squeeze(-1)  # [num_cand]
+                target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                if len(target_pos) > 0:
+                    select_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+
+            elif token_type == 4:
+                logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
+                target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                if len(target_pos) > 0:
+                    branch_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+
+
+
+        return select_loss + branch_loss

@@ -274,8 +274,8 @@ if __name__ == "__main__":
     oracle = 'optimal_plunger'
     problem = 'GISP'
     data_partitions = ['train'] #dont change
-    n_cpu = 1
-    n_instance = 1
+    n_cpu = 8
+    n_instance = 1000
     device = 'cpu'
     
     with open("nnodes.csv", "w") as f:
