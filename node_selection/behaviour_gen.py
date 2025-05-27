@@ -109,7 +109,7 @@ class InfeasibleCounter(Eventhdlr):
         self.varrs = varrs
         self.original_conss = original_conss
         self.var2idx = dict([ (str_var, idx) for idx, var in enumerate(self.varrs) for str_var in [str(var)]  ])
-
+        # print(f'the total vars {self.var2idx}')
         if not os.path.exists(self.save_dir) :
             os.makedirs(self.save_dir , exist_ok=True)
 
@@ -143,8 +143,24 @@ class InfeasibleCounter(Eventhdlr):
             torch.save(data, file_path)
         if(event.getName() == 'NODEFOCUSED'):
             # branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
-            # last_branch_candidates = [str(cand) for cand in branch_cands]
-            print()
+            # cands_indexs = []
+            # current_time = time.time()
+            # file_path = self.save_dir + f"/{current_time:.4f}_branchinfo_{node_number}.pt"
+            # for i in range(npriocands):
+            #     var = str(branch_cands[i])
+            #     if var in self.var2idx:
+            #         _var_idx = self.var2idx[var]
+            #     elif var.startswith("t_") and var[2:] in self.var2idx:
+            #         _var_idx = self.var2idx[var[2:]]
+            #     else:
+            #         print("error in save branch_cands info")
+            #     cands_indexs.append(_var_idx) 
+            # info = {
+            #     "candidate_indices": cands_indexs
+            # }
+            # torch.save(info, file_path)
+            # print()
+            pass
         if(event.getName() == 'NODEBRANCHED'):
             leaves, children, siblings = self.model.getOpenNodes()
             open_nodes = leaves + children + siblings
@@ -186,6 +202,7 @@ class InfeasibleCounter(Eventhdlr):
                             "candidate_indices": cands_indexs,
                             "selected_var_index": var_idx
                         }
+                        print(f'branch on the node {node_number} and  var {bvar}')
                         torch.save(info, file_path)
                         save_branch_info = True
                     child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]], device=self.device).float()
@@ -196,7 +213,7 @@ class InfeasibleCounter(Eventhdlr):
 
 
 
-def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
+def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_model):
     
     model = sp.Model()
     model.hideOutput()
@@ -244,10 +261,10 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device):
     return 1
 
 
-def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device):
+def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device,debug_model):
     
     for instance in instances:
-        run_episode(oracle_type, instance, save_dir, save_dir_svm, device)
+        run_episode(oracle_type, instance, save_dir, save_dir_svm, device,debug_model)
         
     print("finished running episodes for process")
         
@@ -273,11 +290,12 @@ if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
     problem = 'GISP'
-    data_partitions = ['train'] #dont change
-    n_cpu = 8
-    n_instance = 1000
+    data_partitions = ['one'] #dont change
+    n_cpu = 1
+    n_instance = 1
     device = 'cpu'
-    
+    debug_model = 0
+
     with open("nnodes.csv", "w") as f:
         f.write("")
         f.close()
@@ -298,6 +316,8 @@ if __name__ == "__main__":
             n_instance = int(sys.argv[i + 1])
         if sys.argv[i] == '-device':
             device = str(sys.argv[i + 1])
+        if sys.argv[i] == '-debug_model':
+            debug_model = int(sys.argv[i + 1])
    
    
   
@@ -317,8 +337,8 @@ if __name__ == "__main__":
         # except FileExistsError:
         #     ""
         
-        n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.2*n_instance)
-        
+        #n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.2*n_instance)
+        n_keep = n_instance
         instances = list(Path(os.path.join(os.path.dirname(__file__), 
                                            f"../problem_generation/data/{problem}/{data_partition}")).glob("*.lp"))
         random.shuffle(instances)
@@ -333,7 +353,8 @@ if __name__ == "__main__":
                                                         instances=instances[ p1 : p2], 
                                                         save_dir=save_dir,
                                                         save_dir_svm=save_dir_svm,
-                                                        device=device))
+                                                        device=device,
+                                                        debug_model=debug_model))
                         for p,(p1,p2) in enumerate(distribute(len(instances), n_cpu))]
         
         

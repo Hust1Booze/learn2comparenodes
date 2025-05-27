@@ -157,11 +157,17 @@ class DTModel(nn.Module):
             valid_indices = [t for t in range(T) if type_ids[b, t].item() in [2, 4] and actions[b, t] >= 0]
             if not valid_indices:
                 continue
-            t = random.choice(valid_indices)  # 只选一个位置
+            valid = False
+            tries = 0
+            max_tries = 100  # 防止死循环
 
-            token_type = type_ids[b, t].item()
-            if token_type not in [2, 4] or actions[b, t] < 0:
-                continue
+            while not valid and tries < max_tries:
+                t = random.choice(valid_indices)
+                token_type = type_ids[b, t].item()
+                if token_type in [2, 4] and actions[b, t] >= 0 and isinstance(candidates[b][t],list) and len(candidates[b][t]) > 1:
+                    valid = True
+                else:
+                    tries += 1
 
             x_prefix = x[b:b+1, :t, :]  # [1, t+1, D]
             causal_mask = self.generate_causal_mask(t, device)
@@ -170,10 +176,10 @@ class DTModel(nn.Module):
             encoded = self.transformer(x_prefix)  # [1, t+1, D]
 
             candidate_indices = candidates[b][t]
-            if isinstance(candidate_indices, torch.Tensor):
-                candidate_indices = candidate_indices.tolist()
-            if not isinstance(candidate_indices, list) or len(candidate_indices) == 0:
-                continue
+            # if isinstance(candidate_indices, torch.Tensor):
+            #     candidate_indices = candidate_indices.tolist()
+            # if not isinstance(candidate_indices, list) or len(candidate_indices) == 0:
+            #     continue
 
             candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
             candidate_repr = encoded[0, candidate_tensor]  # [num_cand, D]
@@ -193,3 +199,59 @@ class DTModel(nn.Module):
 
 
         return select_loss + branch_loss
+    
+    def get_select_node_decision(self, sequence, type_ids, candidates, actions):
+        device = sequence.device
+        T,D = sequence.shape
+        type_embed = self.type_embedding(type_ids)
+        pos_ids = torch.arange(T, device=device).unsqueeze(0)
+        pos_embed = self.pos_embedding(pos_ids)
+
+        #pos_embed = pos_embed.squeeze(0)
+        x = sequence + type_embed + pos_embed
+
+        encoded = self.transformer(x)
+        candidate_indices = candidates[-1]
+
+        logits = self.select_head(encoded).squeeze(-1)  # [num_cand]
+
+
+        mask = (type_ids == 5)
+        if mask.any():
+            selected_logits = logits.squeeze(0)[mask]  # 取出 type==5 对应的 logits
+            sorted_indices = torch.argsort(selected_logits, descending=True)  # 排序索引（大到小）
+            
+            # 找出原始 logits 中满足 mask 的 indices
+            original_indices = torch.nonzero(mask, as_tuple=False).squeeze(1)
+            
+            # 根据排序后的 logits 索引到对应的 action
+            sorted_actions = actions[original_indices[sorted_indices]]
+            return sorted_actions
+        else:
+            print("why no nodes!")
+            return []
+        
+    def get_branch_var_decision(self, sequence, type_ids, candidates, actions):
+        device = sequence.device
+        T,D = sequence.shape
+        type_embed = self.type_embedding(type_ids)
+        pos_ids = torch.arange(T, device=device).unsqueeze(0)
+        pos_embed = self.pos_embedding(pos_ids)
+
+        #pos_embed = pos_embed.squeeze(0)
+        x = sequence + type_embed + pos_embed
+
+        encoded = self.transformer(x)
+        candidate_indices = candidates[-1]
+
+        logits = self.branch_head(encoded).squeeze(-1)  # [num_cand]
+
+
+        mask = (type_ids == 1)
+        if mask.any():
+            vars_logits = logits.squeeze(0)[mask]  # 取出 type==5 对应的 logits
+            
+            return vars_logits
+        else:
+            print("why no vars!")
+            return []

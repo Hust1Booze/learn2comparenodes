@@ -192,3 +192,33 @@ def bnb_collate(batch, pad_value=0.0):
         torch.stack(attention_masks),     # [B, L]
     )
 
+
+
+def calculate_average_reward(dataset):
+    total_reward = 0.0
+    for i in range(len(dataset)):
+        _ = dataset[i]  # This will compute reward_accum during __getitem__
+        dir_path = dataset.trajectories[i]
+        pt_files = sorted(list(Path(dir_path).glob("*.pt")),
+                        key=lambda p: float(p.name.split("_")[0]))
+
+        reward_accum = 0.0
+        state_embedded = False
+
+        for pt in pt_files:
+            name = pt.name
+            if name.endswith("origin_milp.pt") and not state_embedded:
+                state_embedded = True
+            elif "selected" in name and state_embedded:
+                reward_accum += -1
+            elif "branch_on" in name and state_embedded:
+                reward_accum += -1
+            elif "bestsolfound" in name and state_embedded:
+                reward_accum += 100
+            elif "nodeinfeasible" in name and state_embedded:
+                reward_accum += 10
+
+        total_reward += reward_accum
+
+    avg_reward = total_reward / len(dataset)
+    return avg_reward
