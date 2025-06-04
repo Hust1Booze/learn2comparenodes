@@ -110,7 +110,7 @@ class GNNEncoder(torch.nn.Module):
 
 
 class DTModel(nn.Module):
-    def __init__(self,d_model=32, n_heads=4, n_layers=4, dropout=0.1, type_vocab_size=6):
+    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6):
         super().__init__()
         self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
         self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=-1)
@@ -132,14 +132,26 @@ class DTModel(nn.Module):
             nn.Linear(d_model, 1)  # example: predict score or class
         )
 
-        self.select_head = nn.Linear(d_model, 1)
-        self.branch_head = nn.Linear(d_model, 1)
+        self.select_head = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, 1)
+        )
 
+        self.branch_head = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, 1)
+        )
 
     def generate_causal_mask(self, length, device):
         return torch.triu(torch.ones(length, length, device=device), diagonal=1).bool()
 
-    def forward(self, batch_tokens, type_ids, attention_mask, actions, candidates):
+    def forward(self, batch_tokens, type_ids, attention_mask, actions, candidates, branch_scores):
         B, T, D = batch_tokens.shape
         device = batch_tokens.device
 
@@ -152,53 +164,87 @@ class DTModel(nn.Module):
         select_loss = torch.tensor(0.0, device=device)
         branch_loss = torch.tensor(0.0, device=device)
 
-        for b in range(B):
-            #for t in range(T):
-            valid_indices = [t for t in range(T) if type_ids[b, t].item() in [2, 4] and actions[b, t] >= 0]
-            if not valid_indices:
-                continue
-            valid = False
-            tries = 0
-            max_tries = 100  # 防止死循环
+        select_steps = 0
+        
 
-            while not valid and tries < max_tries:
-                t = random.choice(valid_indices)
+        select_correct = 0
+        branch_correct = 0
+        
+        
+        for b in range(B):  # 遍历 batch 中的每个 sample
+            branch_steps = 0
+            branch_ids = -1
+            for t in range(T):  # 遍历该 sample 的所有时间步
                 token_type = type_ids[b, t].item()
-                if token_type in [2, 4] and actions[b, t] >= 0 and isinstance(candidates[b][t],list) and len(candidates[b][t]) > 1:
-                    valid = True
-                else:
-                    tries += 1
+                if token_type ==4: 
+                    branch_ids += 1
+                if token_type not in [2, 4]:
+                    continue
+                if actions[b, t] < 0:
+                    continue
+                if not isinstance(candidates[b][t], list) or len(candidates[b][t]) <= 1:
+                    continue
 
-            x_prefix = x[b:b+1, :t, :]  # [1, t+1, D]
-            causal_mask = self.generate_causal_mask(t, device)
-            pad_mask = attention_mask[b:b+1, :t] == 0
+                x_prefix = x[b:b+1, :t, :]  # [1, t, D]
+                causal_mask = self.generate_causal_mask(t, device)
+                pad_mask = attention_mask[b:b+1, :t] == 0
 
-            encoded = self.transformer(x_prefix)  # [1, t+1, D]
+                encoded = self.transformer(x_prefix)  # [1, t, D]
 
-            candidate_indices = candidates[b][t]
-            # if isinstance(candidate_indices, torch.Tensor):
-            #     candidate_indices = candidate_indices.tolist()
-            # if not isinstance(candidate_indices, list) or len(candidate_indices) == 0:
-            #     continue
+                candidate_indices = candidates[b][t]
+                candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
+                candidate_repr = encoded[0, candidate_tensor]  # [num_cand, D]
 
-            candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
-            candidate_repr = encoded[0, candidate_tensor]  # [num_cand, D]
+                if token_type == 2:  # 节点选择
+                    logits = self.select_head(candidate_repr).squeeze(-1)  # [num_cand]
+                    target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                    if len(target_pos) > 0:
+                        select_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+                        select_steps += 1
+                    
+                    pred_pos = logits.argmax().item()
+                    if pred_pos == target_pos.item():
+                        select_correct += 1
 
-            if token_type == 2:
-                logits = self.select_head(candidate_repr).squeeze(-1)  # [num_cand]
-                target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
-                if len(target_pos) > 0:
-                    select_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+                elif token_type == 4:  # 分支变量选择
 
-            elif token_type == 4:
-                logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
-                target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
-                if len(target_pos) > 0:
-                    branch_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+                    # 使用 assert 检查长度是否一致
+                    assert len(candidate_repr) == len(branch_scores[b][branch_steps]), \
+                    f"\n Length mismatch in B - T :{b} - {t} branch_steps: {branch_steps} \
+                        \n candidate_indices : {candidate_indices} and\n scores ({branch_scores[b][branch_steps]})"
+                    
+                    if len(candidate_repr) != len(branch_scores[b][branch_steps]):
+                        print("error in train branch, candidiates not equal to socres")
+                    logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
+                    scores = torch.tensor(branch_scores[b][branch_steps], device=device, dtype=torch.float32)
+                    
+                    # 使用 KL 散度损失
+                    branch_loss += F.kl_div(
+                        F.log_softmax(logits, dim=-1),
+                        F.softmax(scores, dim=-1),
+                        reduction='batchmean'
+                    )
+                    branch_steps += 1
 
+                    # 计算准确率（使用硬标签）
+                    target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                    if len(target_pos) > 0:
+                        pred_pos = logits.argmax().item()
+                        if pred_pos == target_pos.item():
+                            branch_correct += 1
 
+        # 计算平均损失
+        if select_steps > 0:
+            select_loss = select_loss / select_steps
+        if branch_steps > 0:
+            branch_loss = branch_loss / branch_steps
 
-        return select_loss + branch_loss
+        # 计算准确率
+        select_acc = select_correct / max(select_steps, 1)
+        branch_acc = branch_correct / max(branch_steps, 1)
+
+        return select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc
+    
     
     def get_select_node_decision(self, sequence, type_ids, candidates, actions):
         device = sequence.device

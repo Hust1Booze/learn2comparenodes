@@ -20,7 +20,7 @@ from recorders_debug import LPFeatureRecorder,CompFeaturizer
 
 # this class use to save Branch and bound sequence states, and output dt models input
 class BNB_States():
-    def __init__(self, comb_model, device, init_reward = 1000): #for gisp avg_reward = 700
+    def __init__(self, comb_model, device, init_reward = 224): #for gisp avg_reward = 700
         self.sequence = [] # [states, selected node, reward, branch, node, node, selected node ...]
         self.type_ids = []
         self.actions = []  
@@ -285,7 +285,8 @@ class BNB_State_Trigger(Eventhdlr):
                             "selected_var_index": var_idx
                         }
                         #torch.save(info, file_path)
-                        print(f'branch on the node {node_number} and  var {bvar}')
+                        print(f'from states : branch on the node {node_number} and  var {bvar}')
+                        #print(f'from states : branch on the node {node_number} and  var {bvar} and candidates {branch_cands}')
                         self.bnbstates.receive_states('NODEBRANCHED_INFO',info)
                         save_branch_info = True
                     child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]], device=self.device).float()
@@ -346,8 +347,9 @@ class BNB_Brancher(sp.Branchrule):
             # candidate_scores = var_logits[candidate_mask]
             # best_var = candidate_vars[candidate_scores.argmax()]
             #best_var = candidate_vars[0]
-
-
+        if self.debug:
+            print(f'branch on {self.model.getCurrentNode().getNumber()} and {best_var}')
+            #print(f'branch on {self.model.getCurrentNode().getNumber()} - {best_var} and candidates :{branch_cands}')
         self.model.branchVar(best_var)
         result = SCIP_RESULT.BRANCHED
 

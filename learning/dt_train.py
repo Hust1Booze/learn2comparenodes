@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset,bnb_collate,calculate_average_reward
 from dt_model import DTModel
 import time
+import gc
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -14,47 +15,78 @@ def train():
     model = DTModel().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    dataset = BnBSequentialDataset("/data/ltf/dt_foundation/dt_bnb/node_selection/data/GISP", model, device)
+    dataset = BnBSequentialDataset("/data/ltf/dt_foundation/dt_bnb/node_selection/data/GISP", model, device, max_samples= 10)
     avg_reward = calculate_average_reward(dataset)
     print(f"Average reward: {avg_reward}")
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=bnb_collate)
-
-    # 添加垃圾回收
-    import gc
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=bnb_collate)
+   
+    best_loss = float('inf')
+    patience = 10
+    patience_counter = 0
 
     for epoch in range(100000):
         model.train()
-        total_loss = 0
+        total_select_loss = 0
+        total_branch_loss = 0
+        total_select_acc = 0
+        total_branch_acc = 0
+        total_select_steps = 0
+        total_branch_steps = 0
 
-        start_time = time.time()  # ⏱️ 开始计时
+        start_time = time.time()
 
-        for batch_tokens, type_ids, actions, candidates, attention_mask in dataloader:
+        for batch_tokens, type_ids, actions, candidates, branch_scores, attention_mask in dataloader:
             batch_tokens = batch_tokens.to(device)
             type_ids = type_ids.to(device)
             actions = actions.to(device)
             attention_mask = attention_mask.to(device)
 
-            loss = model(batch_tokens, type_ids, attention_mask, actions, candidates)
+            select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc = model(
+                batch_tokens, type_ids, attention_mask, actions, candidates, branch_scores
+            )
+
+            total_loss = select_loss + branch_loss
             optimizer.zero_grad()
-            loss.backward()
+            total_loss.backward()
             optimizer.step()
 
-            total_loss += loss.item()
-            
-            del loss
-            torch.cuda.empty_cache()
+            total_select_loss += select_loss.item()
+            total_branch_loss += branch_loss.item()
+            total_select_acc += select_acc * select_steps
+            total_branch_acc += branch_acc * branch_steps
+            total_select_steps += select_steps
+            total_branch_steps += branch_steps
 
-        end_time = time.time()  # ⏱️ 结束计时
+        # 计算平均指标
+        avg_select_loss = total_select_loss / len(dataloader)
+        avg_branch_loss = total_branch_loss / len(dataloader)
+        avg_select_acc = total_select_acc / max(total_select_steps, 1)
+        avg_branch_acc = total_branch_acc / max(total_branch_steps, 1)
+
+        end_time = time.time()
         duration = end_time - start_time
 
-        print(f"Epoch {epoch}: Loss = {total_loss:.4f} | Time: {duration:.2f} seconds")
+        print(f"Epoch {epoch}:")
+        print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
+        print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
+        print(f"  Time: {duration:.2f} seconds")
+
+        # 早停检查
+        current_loss = avg_select_loss + avg_branch_loss
+        if current_loss < best_loss:
+            best_loss = current_loss
+            patience_counter = 0
+            # 保存最佳模型
+            torch.save(model.state_dict(), "best_dt_model.pth")
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+
         # 每个 epoch 结束后进行垃圾回收
         gc.collect()
         torch.cuda.empty_cache()
-
-        if epoch % 10 == 0:
-            torch.save(model.state_dict(), f"models/dt_model_{epoch}.pth")
-
 
 if __name__ == "__main__":
     train()

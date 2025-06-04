@@ -54,7 +54,7 @@ Thumbs.db
 *.pt
 *.pkl
 
-# Data
+# Datas
 *.csv
 *.pt
 *.pkl
@@ -63,3 +63,5 @@ Thumbs.db
 
 *.pth
 *.png
+
+pyscipopt_back/

@@ -59,7 +59,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     save_dir = save_dir + str(instance).split("/")[-1]
 
     comb_model = DTModel()
-    comb_model.load_state_dict(torch.load("models/dt_model_1470.pth"))
+    comb_model.load_state_dict(torch.load("models/best_dt_model.pth"))
 
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
 
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     n_cpu = 1
     n_instance = 1
     device = 'cpu'
-    debug_model = 1 # 0 : no_debug; 1: dt; 2:selector_only; 3:brancher_only; 4:no decisions
+    debug_model = 3 # 0 : no_debug; 1: dt; 2:selector_only; 3:brancher_only; 4:no decisions
 
     with open("nnodes.csv", "w") as f:
         f.write("")
