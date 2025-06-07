@@ -131,6 +131,14 @@ class StrongBranchingRule(sp.Branchrule):
         if lperror:
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
+        # 10%的概率随机选择分支变量，90%的概率选择得分最高的变量
+        if random.random() < 0.1:
+            # 随机选择
+            best_cand_idx = random.randint(0, npriocands - 1)
+        else:
+            # 选择得分最高的变量（保持原逻辑）
+            pass  # best_cand_idx 已经在上面的循环中确定
+
         # Branch on the variable with the largest score
         down_child, eq_child, up_child = self.model.branchVarVal(
             branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
@@ -332,7 +340,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_mod
     
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
 
-    save_dir = save_dir + str(instance).split("/")[-1]
+    save_dir = save_dir + str(instance).split("/")[-1] + f"_{int(time.time())}"
 
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
     comp_behaviour_saver_svm = CompFeaturizerSVM(model, f"{save_dir_svm}", instance_name=str(instance).split("/")[-1])

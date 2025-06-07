@@ -15,15 +15,17 @@ def train():
     model = DTModel().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    dataset = BnBSequentialDataset("/data/ltf/dt_foundation/dt_bnb/node_selection/data/GISP", model, device, max_samples= 10)
+    dataset = BnBSequentialDataset("/data/ltf/dt_foundation/dt_bnb/node_selection/data/GISP", model, device, max_samples= 1000)
     avg_reward = calculate_average_reward(dataset)
     print(f"Average reward: {avg_reward}")
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=bnb_collate)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=bnb_collate)
    
     best_loss = float('inf')
-    patience = 10
+    patience = 1000
     patience_counter = 0
 
+    select_loss_weight = 0
+    branch_loss_weight = 10
     for epoch in range(100000):
         model.train()
         total_select_loss = 0
@@ -45,7 +47,7 @@ def train():
                 batch_tokens, type_ids, attention_mask, actions, candidates, branch_scores
             )
 
-            total_loss = select_loss + branch_loss
+            total_loss = select_loss*select_loss_weight + branch_loss*branch_loss_weight
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
@@ -69,7 +71,7 @@ def train():
         print(f"Epoch {epoch}:")
         print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
         print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
-        print(f"  Time: {duration:.2f} seconds")
+        print(f"  Time: {duration:.2f} seconds", flush= True)
 
         # 早停检查
         current_loss = avg_select_loss + avg_branch_loss

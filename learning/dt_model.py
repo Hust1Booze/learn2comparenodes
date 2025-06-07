@@ -47,17 +47,12 @@ class GNNEncoder(torch.nn.Module):
             torch.nn.ReLU(),
         )
 
-
-
-        #double check
- 
         self.convs = []
-        
         self.conv1 = GraphConv((emb_size, emb_size), hidden_dim1 )
         self.conv2 = GraphConv((hidden_dim1, hidden_dim1), hidden_dim2 )
         self.conv3 = GraphConv((hidden_dim2, hidden_dim2), hidden_dim3 )
         
-        self.convs = [ self.conv1, self.conv2]
+        self.convs = [self.conv1, self.conv2]
         
         out_size = hidden_dim3 if len(self.convs)==3 else emb_size
         
@@ -70,23 +65,15 @@ class GNNEncoder(torch.nn.Module):
     def forward(self, constraint_features, edge_indices, edge_features, 
                        variable_features, bbounds, depth):
 
-        
         #Assume edge indice var to cons, constraint_mask of shape [Nconvs]       
-        
-        
         variable_features = self.var_embedding(variable_features)
         constraint_features = self.cons_embedding(constraint_features)
         edge_features = self.edge_embedding(edge_features)
         bbounds = self.bounds_embedding(bbounds)
-        
-        
-        
+         
         edge_indices_reversed = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
-        
-        
-        
-        for conv in self.convs:
-            
+              
+        for conv in self.convs:           
             #Var to cons
             constraint_features_next = F.relu(conv((variable_features, constraint_features), 
                                               edge_indices,
@@ -110,7 +97,7 @@ class GNNEncoder(torch.nn.Module):
 
 
 class DTModel(nn.Module):
-    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6):
+    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = True):
         super().__init__()
         self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
         self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=-1)
@@ -120,6 +107,10 @@ class DTModel(nn.Module):
 
         self.max_nodes = 10000
         self.max_vars = 10000
+
+        self.temperature = temperature
+        self.use_soft_score_label = use_soft_score_label
+
         self.node_idx_embedding = nn.Embedding(self.max_nodes, d_model)         # for node_idx
         self.branch_var_embedding = nn.Embedding(self.max_vars, d_model)        # for branch var
         self.reward_embedding = nn.Linear(1, d_model)                           # for reward (scalar → vector)
@@ -165,19 +156,16 @@ class DTModel(nn.Module):
         branch_loss = torch.tensor(0.0, device=device)
 
         select_steps = 0
-        
+        branch_steps = 0
 
         select_correct = 0
         branch_correct = 0
-        
+
         
         for b in range(B):  # 遍历 batch 中的每个 sample
-            branch_steps = 0
-            branch_ids = -1
+            cur_branch_steps = 0
             for t in range(T):  # 遍历该 sample 的所有时间步
                 token_type = type_ids[b, t].item()
-                if token_type ==4: 
-                    branch_ids += 1
                 if token_type not in [2, 4]:
                     continue
                 if actions[b, t] < 0:
@@ -209,23 +197,29 @@ class DTModel(nn.Module):
                 elif token_type == 4:  # 分支变量选择
 
                     # 使用 assert 检查长度是否一致
-                    assert len(candidate_repr) == len(branch_scores[b][branch_steps]), \
-                    f"\n Length mismatch in B - T :{b} - {t} branch_steps: {branch_steps} \
-                        \n candidate_indices : {candidate_indices} and\n scores ({branch_scores[b][branch_steps]})"
-                    
-                    if len(candidate_repr) != len(branch_scores[b][branch_steps]):
-                        print("error in train branch, candidiates not equal to socres")
-                    logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
-                    scores = torch.tensor(branch_scores[b][branch_steps], device=device, dtype=torch.float32)
-                    
-                    # 使用 KL 散度损失
-                    branch_loss += F.kl_div(
-                        F.log_softmax(logits, dim=-1),
-                        F.softmax(scores, dim=-1),
-                        reduction='batchmean'
-                    )
-                    branch_steps += 1
+                    assert len(candidate_repr) == len(branch_scores[b][cur_branch_steps]), \
+                    f"\n Length mismatch in B - T :{b} - {t} branch_steps: {cur_branch_steps} \
+                        \n candidate_indices : {candidate_indices} and\n scores ({branch_scores[b][cur_branch_steps]})"
 
+                    logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
+
+                    # score_soft_label
+                    if self.use_soft_score_label:
+                        scores = torch.tensor(branch_scores[b][cur_branch_steps], device=device, dtype=torch.float32)
+                        
+                        # 使用 KL 散度损失
+                        branch_loss += F.kl_div(
+                            F.log_softmax(logits, dim=-1),
+                            F.softmax(scores/self.temperature, dim=-1),
+                            reduction='batchmean'
+                        )
+                    else:
+                        target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                        if len(target_pos) > 0:
+                            branch_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+
+                    cur_branch_steps += 1
+                    branch_steps += 1
                     # 计算准确率（使用硬标签）
                     target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
                     if len(target_pos) > 0:
