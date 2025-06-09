@@ -120,7 +120,7 @@ def distribute(n_instance, n_cpu):
 
 if __name__ == "__main__":
     instance = None
-    n_cpu = 4
+    n_cpu = 8
     exp_dir = "data/GISP/"
     data_partition = None
     min_n = 60
