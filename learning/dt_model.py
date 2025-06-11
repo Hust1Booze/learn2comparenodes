@@ -152,88 +152,100 @@ class DTModel(nn.Module):
 
         x = batch_tokens + type_embed + pos_embed
 
+        # 🔥 优化：一次性计算整个批次的编码，使用因果掩码
+        causal_mask = self.generate_causal_mask(T, device)
+        pad_mask = attention_mask == 0
+        
+        # 使用因果掩码进行批量编码，避免重复计算
+        encoded = self.transformer(x, mask=causal_mask, src_key_padding_mask=pad_mask)  # [B, T, D]
+
         select_loss = torch.tensor(0.0, device=device)
         branch_loss = torch.tensor(0.0, device=device)
-
         select_steps = 0
         branch_steps = 0
-
         select_correct = 0
         branch_correct = 0
 
+        # 🔥 优化：批量收集所有需要处理的位置
+        select_positions = []  # 存储 (b, t, candidate_indices)
+        branch_positions = []  # 存储 (b, t, candidate_indices, branch_step)
         
-        for b in range(B):  # 遍历 batch 中的每个 sample
+        for b in range(B):
             cur_branch_steps = 0
-            for t in range(T):  # 遍历该 sample 的所有时间步
+            for t in range(T):
                 token_type = type_ids[b, t].item()
-                if token_type not in [2, 4]:
-                    continue
-                if actions[b, t] < 0:
+                if token_type not in [2, 4] or actions[b, t] < 0:
                     continue
                 if not isinstance(candidates[b][t], list) or len(candidates[b][t]) <= 1:
                     continue
 
-                x_prefix = x[b:b+1, :t, :]  # [1, t, D]
-                causal_mask = self.generate_causal_mask(t, device)
-                pad_mask = attention_mask[b:b+1, :t] == 0
-
-                encoded = self.transformer(x_prefix)  # [1, t, D]
-
                 candidate_indices = candidates[b][t]
-                candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
-                candidate_repr = encoded[0, candidate_tensor]  # [num_cand, D]
-
+                
                 if token_type == 2:  # 节点选择
-                    logits = self.select_head(candidate_repr).squeeze(-1)  # [num_cand]
-                    target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
-                    if len(target_pos) > 0:
-                        select_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
-                        select_steps += 1
+                    select_positions.append((b, t, candidate_indices))
+                elif token_type == 4:  # 分支变量选择
+                    branch_positions.append((b, t, candidate_indices, cur_branch_steps))
+                    cur_branch_steps += 1
+
+        # 🔥 批量处理节点选择任务
+        if select_positions:
+            for b, t, candidate_indices in select_positions:
+                candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
+                # 直接使用预计算的编码，而不是重新计算transformer
+                candidate_repr = encoded[b, candidate_tensor]  # [num_cand, D]
+                
+                logits = self.select_head(candidate_repr).squeeze(-1)
+                target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                
+                if len(target_pos) > 0:
+                    select_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+                    select_steps += 1
                     
                     pred_pos = logits.argmax().item()
                     if pred_pos == target_pos.item():
                         select_correct += 1
 
-                elif token_type == 4:  # 分支变量选择
+        # 🔥 批量处理分支变量选择任务
+        if branch_positions:
+            for b, t, candidate_indices, branch_step in branch_positions:
+                candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
+                # 直接使用预计算的编码，而不是重新计算transformer
+                candidate_repr = encoded[b, candidate_tensor]  # [num_cand, D]
+                
+                # 检查长度一致性
+                assert len(candidate_repr) == len(branch_scores[b][branch_step]), \
+                    f"Length mismatch in B-T: {b}-{t} branch_steps: {branch_step}"
 
-                    # 使用 assert 检查长度是否一致
-                    assert len(candidate_repr) == len(branch_scores[b][cur_branch_steps]), \
-                    f"\n Length mismatch in B - T :{b} - {t} branch_steps: {cur_branch_steps} \
-                        \n candidate_indices : {candidate_indices} and\n scores ({branch_scores[b][cur_branch_steps]})"
+                logits = self.branch_head(candidate_repr).squeeze(-1)
 
-                    logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
-
-                    # score_soft_label
-                    if self.use_soft_score_label:
-                        scores = torch.tensor(branch_scores[b][cur_branch_steps], device=device, dtype=torch.float32)
-                        
-                        # 使用 KL 散度损失
-                        branch_loss += F.kl_div(
-                            F.log_softmax(logits, dim=-1),
-                            F.softmax(scores/self.temperature, dim=-1),
-                            reduction='batchmean'
-                        )
-                    else:
-                        target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
-                        if len(target_pos) > 0:
-                            branch_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
-
-                    cur_branch_steps += 1
-                    branch_steps += 1
-                    # 计算准确率（使用硬标签）
+                # 使用软标签或硬标签
+                if self.use_soft_score_label:
+                    scores = torch.tensor(branch_scores[b][branch_step], device=device, dtype=torch.float32)
+                    branch_loss += F.kl_div(
+                        F.log_softmax(logits, dim=-1),
+                        F.softmax(scores/self.temperature, dim=-1),
+                        reduction='batchmean'
+                    )
+                else:
                     target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
                     if len(target_pos) > 0:
-                        pred_pos = logits.argmax().item()
-                        if pred_pos == target_pos.item():
-                            branch_correct += 1
+                        branch_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
 
-        # 计算平均损失
+                branch_steps += 1
+                
+                # 计算准确率
+                target_pos = (candidate_tensor == actions[b, t]).nonzero(as_tuple=True)[0]
+                if len(target_pos) > 0:
+                    pred_pos = logits.argmax().item()
+                    if pred_pos == target_pos.item():
+                        branch_correct += 1
+
+        # 计算平均损失和准确率
         if select_steps > 0:
             select_loss = select_loss / select_steps
         if branch_steps > 0:
             branch_loss = branch_loss / branch_steps
 
-        # 计算准确率
         select_acc = select_correct / max(select_steps, 1)
         branch_acc = branch_correct / max(branch_steps, 1)
 

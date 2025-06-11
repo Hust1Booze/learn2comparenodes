@@ -16,10 +16,15 @@ def train():
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
     
+    # 🔥 修复：明确设置本地设备
+    if args.local_rank != -1:
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device(f"cuda:{args.local_rank}")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     # 初始化分布式训练
     deepspeed.init_distributed()
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     model = DTModel()
     
