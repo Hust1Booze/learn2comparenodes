@@ -145,12 +145,15 @@ class DTModel(nn.Module):
         mask = torch.triu(torch.ones(sz, sz, device=device), diagonal=1).bool()
         return mask
     
-    def process_sequence_data(self, sequence_data_batch, type_ids, device):
+    def process_sequence_data(self, sequence_data_batch, type_ids, device, actions=None, candidates=None):
         """
         将原始数据batch转换为嵌入向量batch，并处理type_ids展平和padding
+        同时处理actions和candidates的重映射
         sequence_data_batch: [B, L] list of list of dict
         type_ids: [B, L] tensor
-        returns: (padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping)
+        actions: [B, L] tensor (optional)
+        candidates: [B, L] list of list (optional)
+        returns: (padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping, padded_actions, padded_candidates)
         """
         B = len(sequence_data_batch)
         L = len(sequence_data_batch[0])
@@ -160,11 +163,15 @@ class DTModel(nn.Module):
         flattened_embeddings = []
         position_mapping = []  # 记录每个原始位置对应的展平后的索引范围
         flattened_type_ids = []
+        flattened_actions = []
+        flattened_candidates = []
         
         for b in range(B):
             batch_flat = []
             batch_mapping = []
             batch_type_ids = []
+            batch_actions = []
+            batch_candidates = []
             current_pos = 0
             
             for t in range(L):
@@ -201,7 +208,7 @@ class DTModel(nn.Module):
                     child_node_data = data_item['data']
                     child_node_tensor = child_node_data.to(device)
                     child_node_emb = self.node_embedding(child_node_tensor)  # [D]
-                    emb = child_node_emb.unsqueeze(0)  # [1, D]
+                    emb = child_node_emb  # [1, D]
                     
                 elif data_type == 'padding':
                     # 对于padding，添加零向量
@@ -222,10 +229,24 @@ class DTModel(nn.Module):
                 # 为这个时间步的所有token重复相同的type_id
                 token_len = emb.size(0)
                 batch_type_ids.extend([type_ids[b, t].item()] * token_len)
+                
+                # 处理actions和candidates的重映射
+                if actions is not None and candidates is not None:
+                    original_action = actions[b, t].item()
+                    original_candidates = candidates[b][t]
+                    
+                    # 为这个时间步的所有token重复相同的action和candidates
+                    batch_actions.extend([original_action] * token_len)
+                    batch_candidates.extend([original_candidates] * token_len)
+                else:
+                    batch_actions.extend([-1] * token_len)
+                    batch_candidates.extend([[-1]] * token_len)
             
-            # 将这个batch的所有嵌入和type_ids拼接
+            # 将这个batch的所有嵌入和相关数据拼接
             flattened_embeddings.append(torch.cat(batch_flat, dim=0))  # [total_tokens, D]
             flattened_type_ids.append(batch_type_ids)
+            flattened_actions.append(batch_actions)
+            flattened_candidates.append(batch_candidates)
             position_mapping.append(batch_mapping)
         
         # 找到最大长度并进行padding
@@ -233,6 +254,8 @@ class DTModel(nn.Module):
         padded_embeddings = torch.zeros(B, max_len, D, device=device)
         padded_attention_mask = torch.zeros(B, max_len, device=device)
         padded_type_ids = torch.zeros(B, max_len, dtype=torch.long, device=device)
+        padded_actions = torch.zeros(B, max_len, dtype=torch.long, device=device) if actions is not None else None
+        padded_candidates = []
         
         for b in range(B):
             seq_len = flattened_embeddings[b].size(0)
@@ -242,13 +265,24 @@ class DTModel(nn.Module):
             # 填充type_ids
             for i, type_id in enumerate(flattened_type_ids[b]):
                 padded_type_ids[b, i] = type_id
+            
+            # 填充actions
+            if actions is not None:
+                for i, action in enumerate(flattened_actions[b]):
+                    padded_actions[b, i] = action
+                # 填充剩余位置为-1
+                padded_actions[b, seq_len:] = -1
+            
+            # 填充candidates
+            batch_candidates = flattened_candidates[b] + [[-1]] * (max_len - seq_len)
+            padded_candidates.append(batch_candidates)
                     
-        return padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping
+        return padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping, padded_actions, padded_candidates
 
     def forward(self, sequence_data_batch, type_ids, attention_mask, actions, candidates, branch_scores):
         # 首先将原始数据转换为嵌入向量
         device = type_ids.device
-        padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping = self.process_sequence_data(sequence_data_batch, type_ids, device)
+        padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping, padded_actions, padded_candidates = self.process_sequence_data(sequence_data_batch, type_ids, device, actions, candidates)
         
         # 使用padded embeddings进行transformer编码
         type_embed = self.type_embedding(padded_type_ids)
@@ -257,12 +291,6 @@ class DTModel(nn.Module):
 
         x = padded_embeddings + type_embed + pos_embed
 
-        # 使用因果掩码进行批量编码
-        causal_mask = self.generate_causal_mask(padded_embeddings.size(1), device)
-        pad_mask = padded_attention_mask == 0
-        
-        encoded = self.transformer(x, mask=causal_mask, src_key_padding_mask=pad_mask)  # [B, max_len, D]
-
         select_loss = torch.tensor(0.0, device=device)
         branch_loss = torch.tensor(0.0, device=device)
         select_steps = 0
@@ -270,84 +298,82 @@ class DTModel(nn.Module):
         select_correct = 0
         branch_correct = 0
 
-        # 现在需要将编码后的结果映射回原始的时间步
-        B = len(sequence_data_batch)
-        T = len(sequence_data_batch[0])
+        # 现在使用padded的sequence进行处理
+        B, T = padded_type_ids.shape
         
-        for b in range(B):
-            cur_branch_steps = 0
-            for t in range(T):
-                token_type = type_ids[b, t].item()
-                if token_type not in [2, 4] or actions[b, t] < 0:
+        for b in range(B):  # 遍历 batch 中的每个 sample
+            branch_steps = 0
+            branch_ids = -1
+            for t in range(T):  # 遍历该 sample 的所有时间步
+                token_type = padded_type_ids[b, t].item()
+                if token_type ==4: 
+                    branch_ids += 1
+                if token_type not in [2, 4]:
                     continue
-                if not isinstance(candidates[b][t], list) or len(candidates[b][t]) <= 1:
+                if padded_actions[b, t] < 0:
+                    continue
+                if not isinstance(padded_candidates[b][t], list) or len(padded_candidates[b][t]) <= 1:
                     continue
 
-                candidate_indices = candidates[b][t]
-                
-                # 获取这个时间步对应的编码表示
-                start_pos, end_pos = position_mapping[b][t]
-                step_encoded = encoded[b, start_pos:end_pos]  # [token_len, D]
-                
-                # 对于多个token的情况（如GNN状态），取平均或者其他聚合方式
-                if step_encoded.size(0) > 1:
-                    step_repr = step_encoded.mean(dim=0)  # [D]
-                else:
-                    step_repr = step_encoded.squeeze(0)  # [D]
-                
+                x_prefix = x[b:b+1, :t, :]  # [1, t, D]
+
+                encoded = self.transformer(x_prefix)  # [1, t, D]
+
+                candidate_indices = padded_candidates[b][t]
+                candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
+                candidate_repr = encoded[0, candidate_tensor]  # [num_cand, D]
+
                 if token_type == 2:  # 节点选择
-                    candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
-                    # 这里需要从候选节点中获取表示，但现在step_repr只是当前步的表示
-                    # 可能需要重新考虑这部分逻辑
-                    logits = self.select_head(step_repr.unsqueeze(0)).squeeze(-1)
+                    logits = self.select_head(candidate_repr).squeeze(-1)  # [num_cand]
+                    target_pos = (candidate_tensor == padded_actions[b, t]).nonzero(as_tuple=True)[0]
+                    if len(target_pos) > 0:
+                        select_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+                        select_steps += 1
                     
-                    # 简化处理：直接使用当前表示预测
-                    target_idx = candidate_indices.index(actions[b, t]) if actions[b, t] in candidate_indices else 0
-                    target_tensor = torch.tensor([target_idx], device=device, dtype=torch.long)
-                    
-                    select_loss += F.cross_entropy(logits.unsqueeze(0), target_tensor)
-                    select_steps += 1
-                    
-                    pred_idx = logits.argmax().item() if logits.numel() > 1 else 0
-                    if pred_idx == target_idx:
+                    pred_pos = logits.argmax().item()
+                    if pred_pos == target_pos.item():
                         select_correct += 1
 
                 elif token_type == 4:  # 分支变量选择
-                    candidate_tensor = torch.tensor(candidate_indices, device=device, dtype=torch.long)
-                    logits = self.branch_head(step_repr.unsqueeze(0)).squeeze(-1)
-                    
-                    # 简化处理
-                    target_idx = candidate_indices.index(actions[b, t]) if actions[b, t] in candidate_indices else 0
-                    
-                    if self.use_soft_score_label:
-                        scores = torch.tensor(branch_scores[b][cur_branch_steps], device=device, dtype=torch.float32)
-                        branch_loss += F.kl_div(
-                            F.log_softmax(logits, dim=-1),
-                            F.softmax(scores/self.temperature, dim=-1),
-                            reduction='batchmean'
-                        )
-                    else:
-                        target_tensor = torch.tensor([target_idx], device=device, dtype=torch.long)
-                        branch_loss += F.cross_entropy(logits.unsqueeze(0), target_tensor)
 
+                    # 使用 assert 检查长度是否一致
+                    assert len(candidate_repr) == len(branch_scores[b][branch_steps]), \
+                    f"\n Length mismatch in B - T :{b} - {t} branch_steps: {branch_steps} \
+                        \n candidate_indices : {candidate_indices} and\n scores ({branch_scores[b][branch_steps]})"
+                    
+                    if len(candidate_repr) != len(branch_scores[b][branch_steps]):
+                        print("error in train branch, candidiates not equal to socres")
+                    logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
+                    scores = torch.tensor(branch_scores[b][branch_steps], device=device, dtype=torch.float32)
+                    
+                    # 使用 KL 散度损失
+                    branch_loss += F.kl_div(
+                        F.log_softmax(logits, dim=-1),
+                        F.softmax(scores, dim=-1),
+                        reduction='batchmean'
+                    )
                     branch_steps += 1
-                    cur_branch_steps += 1
-                    
-                    pred_idx = logits.argmax().item() if logits.numel() > 1 else 0
-                    if pred_idx == target_idx:
-                        branch_correct += 1
 
-        # 计算平均损失和准确率
+                    # 计算准确率（使用硬标签）
+                    target_pos = (candidate_tensor == padded_actions[b, t]).nonzero(as_tuple=True)[0]
+                    if len(target_pos) > 0:
+                        pred_pos = logits.argmax().item()
+                        if pred_pos == target_pos.item():
+                            branch_correct += 1
+
+        # 计算平均损失
         if select_steps > 0:
             select_loss = select_loss / select_steps
         if branch_steps > 0:
             branch_loss = branch_loss / branch_steps
 
+        # 计算准确率
         select_acc = select_correct / max(select_steps, 1)
         branch_acc = branch_correct / max(branch_steps, 1)
 
         return select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc
     
+
     
     def get_select_node_decision(self, sequence, type_ids, candidates, actions):
         device = sequence.device
