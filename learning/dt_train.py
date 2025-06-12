@@ -8,6 +8,7 @@ import time
 import gc
 import deepspeed
 import argparse
+import os
 
 def train():
     # 解析命令行参数（DeepSpeed需要）
@@ -16,20 +17,13 @@ def train():
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()
     
-    # 🔥 修复：明确设置本地设备
-    if args.local_rank != -1:
-        torch.cuda.set_device(args.local_rank)
-        device = torch.device(f"cuda:{args.local_rank}")
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
     # 初始化分布式训练
     deepspeed.init_distributed()
     
     model = DTModel()
     
     # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/foundation/learn2comparenodes/node_selection/data/GISP", model, device, max_samples= 1000)
+    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
     
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
@@ -38,9 +32,6 @@ def train():
         model_parameters=model.parameters()
     )
     
-    # 注意：不要重复定义optimizer，DeepSpeed已经创建了
-    # optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)  # 删除这行
-
     # 计算平均奖励（使用静态方法，不需要模型前向传播）
     if model_engine.global_rank == 0:  # 只在主进程打印
         avg_reward = calculate_average_reward_static(dataset)
@@ -68,11 +59,16 @@ def train():
         start_time = time.time()
 
         for batch in dataloader:
-            batch = [x.to(model_engine.device) if torch.is_tensor(x) else x for x in batch]
-            batch_tokens, type_ids, actions, candidates, branch_scores, attention_mask = batch
+            # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
+            sequence_data, type_ids, actions, candidates, branch_scores, attention_mask = batch
+            
+            # 将非tensor数据移动到设备 - sequence_data是list不需要移动
+            type_ids = type_ids.to(model_engine.device)
+            actions = actions.to(model_engine.device)
+            attention_mask = attention_mask.to(model_engine.device)
 
             select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc = model_engine(
-                batch_tokens, type_ids, attention_mask, actions, candidates, branch_scores
+                sequence_data, type_ids, attention_mask, actions, candidates, branch_scores
             )
 
             total_loss = select_loss*select_loss_weight + branch_loss*branch_loss_weight
