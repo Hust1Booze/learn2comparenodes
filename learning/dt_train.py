@@ -9,27 +9,54 @@ import gc
 import deepspeed
 import argparse
 import os
+from torch.utils.tensorboard import SummaryWriter
+import json
 
+# CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
+
+                          
 def train():
+
+    batch_size = 4
+    print_interval = 10  # 每隔10个step打印一次
+    
+    # 创建TensorBoard writer（只在主进程）
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        writer = SummaryWriter(log_dir='./runs/dt_training')
+        print("TensorBoard logging enabled. Run 'tensorboard --logdir=./runs' to view.")
+    else:
+        writer = None
+    
     # 解析命令行参数（DeepSpeed需要）
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--local_rank', type=int, default=-1, help='local rank passed from distributed launcher')
-    parser = deepspeed.add_config_arguments(parser)
-    args = parser.parse_args()
-    
-    # 初始化分布式训练
-    deepspeed.init_distributed()
-    
+    ds_config = {
+        "train_micro_batch_size_per_gpu": batch_size,
+        "optimizer": {
+            "type": "Adam",
+            "params": {
+                "lr": 1e-4
+            }
+        },
+        "fp16": {
+            "enabled": True
+        },
+        "zero_optimization": {
+            "stage": 1,
+            "offload_optimizer": {
+                "device": "cpu"
+            }
+        }
+    }
+
     model = DTModel()
-    
+
     # 先创建数据集（在DeepSpeed初始化之前）
     dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
     
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
-        args=args,
         model=model,
-        model_parameters=model.parameters()
+        model_parameters=model.parameters(),
+        config=ds_config
     )
     
     # 计算平均奖励（使用静态方法，不需要模型前向传播）
@@ -38,14 +65,14 @@ def train():
         print(f"Average reward: {avg_reward}")
     
     # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=bnb_collate)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=bnb_collate)
    
     best_loss = float('inf')
     patience = 1000
     patience_counter = 0
 
-    select_loss_weight = 0
-    branch_loss_weight = 10
+    select_loss_weight = 0.05
+    branch_loss_weight = 1
     
     for epoch in range(100000):
         model_engine.train()
@@ -58,7 +85,7 @@ def train():
 
         start_time = time.time()
 
-        for batch in dataloader:
+        for step, batch in enumerate(dataloader):
             # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
             sequence_data, type_ids, actions, candidates, branch_scores, attention_mask = batch
             
@@ -83,6 +110,25 @@ def train():
             total_select_steps += select_steps
             total_branch_steps += branch_steps
 
+            # 记录每个step的指标到TensorBoard
+            if writer is not None:
+                global_step = epoch * len(dataloader) + step
+                writer.add_scalar('Loss/Select_Loss_Step', select_loss.item(), global_step)
+                writer.add_scalar('Loss/Branch_Loss_Step', branch_loss.item(), global_step)
+                writer.add_scalar('Loss/Total_Loss_Step', total_loss.item(), global_step)
+                writer.add_scalar('Accuracy/Select_Acc_Step', select_acc, global_step)
+                writer.add_scalar('Accuracy/Branch_Acc_Step', branch_acc, global_step)
+                writer.add_scalar('Steps/Select_Steps_Step', select_steps, global_step)
+                writer.add_scalar('Steps/Branch_Steps_Step', branch_steps, global_step)
+
+            # 每隔print_interval个step打印一次loss信息
+            if step % print_interval == 0 and model_engine.global_rank == 0:
+                print(f"Epoch {epoch}, Step {step}:")
+                print(f"  Select Loss: {select_loss.item():.4f}, Branch Loss: {branch_loss.item():.4f}")
+                print(f"  Total Loss: {total_loss.item():.4f}")
+                print(f"  Select Acc: {select_acc:.4f}, Branch Acc: {branch_acc:.4f}")
+                print(f"  Select Steps: {select_steps}, Branch Steps: {branch_steps}", flush=True)
+
         # 计算平均指标
         avg_select_loss = total_select_loss / len(dataloader)
         avg_branch_loss = total_branch_loss / len(dataloader)
@@ -91,6 +137,18 @@ def train():
 
         end_time = time.time()
         duration = end_time - start_time
+
+        # 记录每个epoch的平均指标到TensorBoard
+        if writer is not None:
+            writer.add_scalar('Loss/Select_Loss_Epoch', avg_select_loss, epoch)
+            writer.add_scalar('Loss/Branch_Loss_Epoch', avg_branch_loss, epoch)
+            writer.add_scalar('Loss/Total_Loss_Epoch', avg_select_loss + avg_branch_loss, epoch)
+            writer.add_scalar('Accuracy/Select_Acc_Epoch', avg_select_acc, epoch)
+            writer.add_scalar('Accuracy/Branch_Acc_Epoch', avg_branch_acc, epoch)
+            writer.add_scalar('Steps/Select_Steps_Epoch', total_select_steps, epoch)
+            writer.add_scalar('Steps/Branch_Steps_Epoch', total_branch_steps, epoch)
+            writer.add_scalar('Time/Epoch_Duration', duration, epoch)
+            writer.add_scalar('Learning_Rate', optimizer.param_groups[0]['lr'], epoch)
 
         # 只在主进程打印
         if model_engine.global_rank == 0:
@@ -107,6 +165,9 @@ def train():
             # 保存最佳模型（只在主进程保存）
             if model_engine.global_rank == 0:
                 model_engine.save_checkpoint("./checkpoints", f"best_model_epoch_{epoch}")
+                # 记录最佳loss
+                if writer is not None:
+                    writer.add_scalar('Best/Loss', best_loss, epoch)
         else:
             patience_counter += 1
             if patience_counter >= patience:
@@ -115,8 +176,12 @@ def train():
                 break
 
         # 每个 epoch 结束后进行垃圾回收
-        gc.collect()
-        torch.cuda.empty_cache()
+        # gc.collect()
+        # torch.cuda.empty_cache()
+
+    # 关闭TensorBoard writer
+    if writer is not None:
+        writer.close()
 
 if __name__ == "__main__":
     train()

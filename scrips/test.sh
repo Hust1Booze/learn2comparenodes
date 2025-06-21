@@ -1,23 +1,16 @@
 #!/bin/bash
 #SBATCH -o job.%j.out
-#SBATCH --partition=a100
+#SBATCH --partition=titan
 #SBATCH -J dt_bnb
 #SBATCH -N 1
-#SBATCH --ntasks-per-node=2
-#SBATCH --gres=gpu:2
-#SBATCH --qos=a100
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
+#SBATCH --qos=titan
 
 nvidia-smi
 
 # find / -name nvcc 2>/dev/null
 
-which nvcc
-nvcc -V
-
-module spider GCC
-
-
-module spider gcc
 
 
 
