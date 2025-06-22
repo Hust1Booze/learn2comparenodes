@@ -68,3 +68,5 @@ pyscipopt_back/
 
 *.out
 *.whl
+
+logs/

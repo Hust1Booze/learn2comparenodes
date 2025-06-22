@@ -97,7 +97,7 @@ class GNNEncoder(torch.nn.Module):
 
 
 class DTModel(nn.Module):
-    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = True):
+    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
         super().__init__()
         self.d_model = d_model  # 保存d_model参数
         self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
@@ -346,12 +346,19 @@ class DTModel(nn.Module):
                     logits = self.branch_head(candidate_repr).squeeze(-1)  # [num_cand]
                     scores = torch.tensor(branch_scores[b][branch_steps], device=device, dtype=torch.float32)
                     
-                    # 使用 KL 散度损失
-                    branch_loss += F.kl_div(
-                        F.log_softmax(logits, dim=-1),
-                        F.softmax(scores, dim=-1),
-                        reduction='batchmean'
-                    )
+                    if self.use_soft_score_label:
+                        # 使用 KL 散度损失
+                        branch_loss += F.kl_div(
+                            F.log_softmax(logits, dim=-1),
+                            F.softmax(scores, dim=-1),
+                            reduction='batchmean'
+                        )
+                    else:
+                        # 使用硬标签计算损失（交叉熵）
+                        target_pos = (candidate_tensor == padded_actions[b, t]).nonzero(as_tuple=True)[0]
+                        if len(target_pos) > 0:
+                            branch_loss += F.cross_entropy(logits.unsqueeze(0), target_pos)
+
                     branch_steps += 1
 
                     # 计算准确率（使用硬标签）

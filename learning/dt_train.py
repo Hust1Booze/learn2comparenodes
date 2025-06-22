@@ -9,6 +9,8 @@ import gc
 import deepspeed
 import argparse
 import os
+from torch.utils.tensorboard import SummaryWriter
+import datetime
 
 # CUDA_VISIBLE_DEVICES = int(os.environ[“LOCAL_RANK”])
 
@@ -16,7 +18,7 @@ import os
 def train():
 
     batch_size = 2
-    print_interval = 10  # 每隔10个step打印一次
+    print_interval = 100  # 每隔100个step打印一次
     
     # 解析命令行参数（DeepSpeed需要）
     ds_config = {
@@ -49,6 +51,19 @@ def train():
         model_parameters=model.parameters(),
         config=ds_config
     )
+    
+    # 只在主进程创建TensorBoard writer
+    writer = None
+    if model_engine.global_rank == 0:
+        # 创建TensorBoard writer
+        current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
+        log_dir = f'./logs/train_{current_time}'
+        
+        # 确保日志目录存在
+        os.makedirs(log_dir, exist_ok=True)
+        
+        writer = SummaryWriter(log_dir)
+        print(f"TensorBoard日志将保存到: {log_dir}")
     
     # 计算平均奖励（使用静态方法，不需要模型前向传播）
     if model_engine.global_rank == 0:  # 只在主进程打印
@@ -108,6 +123,17 @@ def train():
                 print(f"  Total Loss: {total_loss.item():.4f}")
                 print(f"  Select Acc: {select_acc:.4f}, Branch Acc: {branch_acc:.4f}")
                 print(f"  Select Steps: {select_steps}, Branch Steps: {branch_steps}", flush=True)
+                
+                # 记录step级别的指标到TensorBoard（只在主进程）
+                if writer is not None:
+                    global_step = epoch * len(dataloader) + step
+                    writer.add_scalar('Step_Loss/Select', select_loss.item(), global_step)
+                    writer.add_scalar('Step_Loss/Branch', branch_loss.item(), global_step)
+                    writer.add_scalar('Step_Loss/Total', total_loss.item(), global_step)
+                    writer.add_scalar('Step_Accuracy/Select', select_acc, global_step)
+                    writer.add_scalar('Step_Accuracy/Branch', branch_acc, global_step)
+                    writer.add_scalar('Step_Count/Select_Steps', select_steps, global_step)
+                    writer.add_scalar('Step_Count/Branch_Steps', branch_steps, global_step)
 
         # 计算平均指标
         avg_select_loss = total_select_loss / len(dataloader)
@@ -124,25 +150,27 @@ def train():
             print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
             print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
             print(f"  Time: {duration:.2f} seconds", flush= True)
+            
+            # 记录epoch级别的指标到TensorBoard（只在主进程）
+            if writer is not None:
+                writer.add_scalar('Epoch_Loss/Select', avg_select_loss, epoch)
+                writer.add_scalar('Epoch_Loss/Branch', avg_branch_loss, epoch)
+                writer.add_scalar('Epoch_Loss/Total', avg_select_loss + avg_branch_loss, epoch)
+                writer.add_scalar('Epoch_Accuracy/Select', avg_select_acc, epoch)
+                writer.add_scalar('Epoch_Accuracy/Branch', avg_branch_acc, epoch)
+                writer.add_scalar('Epoch_Count/Total_Select_Steps', total_select_steps, epoch)
+                writer.add_scalar('Epoch_Count/Total_Branch_Steps', total_branch_steps, epoch)
+                writer.add_scalar('Epoch_Time/Duration', duration, epoch)
+                
+                # 记录学习率
+                current_lr = optimizer.param_groups[0]['lr'] if hasattr(optimizer, 'param_groups') else 1e-4
+                writer.add_scalar('Epoch_Config/Learning_Rate', current_lr, epoch)
 
-        # 早停检查
-        current_loss = avg_select_loss + avg_branch_loss
-        if current_loss < best_loss:
-            best_loss = current_loss
-            patience_counter = 0
-            # 保存最佳模型（只在主进程保存）
-            if model_engine.global_rank == 0:
-                model_engine.save_checkpoint("./checkpoints", f"best_model_epoch_{epoch}")
-        else:
-            patience_counter += 1
-            if patience_counter >= patience:
-                if model_engine.global_rank == 0:
-                    print(f"Early stopping at epoch {epoch}")
-                break
-
-        # 每个 epoch 结束后进行垃圾回收
-        # gc.collect()
-        # torch.cuda.empty_cache()
+    
+    # 关闭TensorBoard writer（只在主进程）
+    if model_engine.global_rank == 0 and writer is not None:
+        writer.close()
+        print(f"TensorBoard日志已保存到: {log_dir}")
 
 if __name__ == "__main__":
     train()
