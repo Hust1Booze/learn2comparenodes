@@ -131,7 +131,7 @@ if __name__ == "__main__":
     alphaE2 = 0.5
     timelimit = 7200.0
     solveInstance = True
-    n_instance = 1000
+    n_instance = 100
     seed = 0
     data_partition = 'train'
     

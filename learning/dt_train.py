@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from dt_dataset import BnBSequentialDataset,bnb_collate,calculate_average_reward, calculate_average_reward_static
+from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
 from dt_model import DTModel
 import time
 import gc
@@ -13,12 +13,10 @@ from torch.utils.tensorboard import SummaryWriter
 import datetime
 
 # CUDA_VISIBLE_DEVICES = int(os.environ[“LOCAL_RANK”])
-
                           
 def train():
 
     batch_size = 2
-    print_interval = 100  # 每隔100个step打印一次
     
     # 解析命令行参数（DeepSpeed需要）
     ds_config = {
@@ -71,11 +69,8 @@ def train():
         print(f"Average reward: {avg_reward}")
     
     # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
    
-    best_loss = float('inf')
-    patience = 1000
-    patience_counter = 0
 
     select_loss_weight = 0.05
     branch_loss_weight = 1
@@ -84,17 +79,17 @@ def train():
         model_engine.train()
         total_select_loss = 0
         total_branch_loss = 0
-        total_select_acc = 0
-        total_branch_acc = 0
         total_select_steps = 0
         total_branch_steps = 0
+        total_branch_corrects = 0
+        total_select_corrects = 0
 
         start_time = time.time()
 
         for step, batch in enumerate(dataloader):
             sequence_data = batch
         
-            select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc = model_engine(sequence_data)
+            select_loss, branch_loss, select_steps, branch_steps, select_corrects, branch_corrects  = model_engine(sequence_data, model_engine.device)
 
             total_loss = select_loss*select_loss_weight + branch_loss*branch_loss_weight
 
@@ -103,35 +98,17 @@ def train():
 
             total_select_loss += select_loss.item()
             total_branch_loss += branch_loss.item()
-            total_select_acc += select_acc * select_steps
-            total_branch_acc += branch_acc * branch_steps
             total_select_steps += select_steps
             total_branch_steps += branch_steps
+            total_select_corrects += select_corrects
+            total_branch_corrects  += branch_corrects
 
-            # 每隔print_interval个step打印一次loss信息
-            if step % print_interval == 0 and model_engine.global_rank == 0:
-                print(f"Epoch {epoch}, Step {step}:")
-                print(f"  Select Loss: {select_loss.item():.4f}, Branch Loss: {branch_loss.item():.4f}")
-                print(f"  Total Loss: {total_loss.item():.4f}")
-                print(f"  Select Acc: {select_acc:.4f}, Branch Acc: {branch_acc:.4f}")
-                print(f"  Select Steps: {select_steps}, Branch Steps: {branch_steps}", flush=True)
-                
-                # 记录step级别的指标到TensorBoard（只在主进程）
-                if writer is not None:
-                    global_step = epoch * len(dataloader) + step
-                    writer.add_scalar('Step_Loss/Select', select_loss.item(), global_step)
-                    writer.add_scalar('Step_Loss/Branch', branch_loss.item(), global_step)
-                    writer.add_scalar('Step_Loss/Total', total_loss.item(), global_step)
-                    writer.add_scalar('Step_Accuracy/Select', select_acc, global_step)
-                    writer.add_scalar('Step_Accuracy/Branch', branch_acc, global_step)
-                    writer.add_scalar('Step_Count/Select_Steps', select_steps, global_step)
-                    writer.add_scalar('Step_Count/Branch_Steps', branch_steps, global_step)
 
         # 计算平均指标
-        avg_select_loss = total_select_loss / len(dataloader)
-        avg_branch_loss = total_branch_loss / len(dataloader)
-        avg_select_acc = total_select_acc / max(total_select_steps, 1)
-        avg_branch_acc = total_branch_acc / max(total_branch_steps, 1)
+        avg_select_loss = total_select_loss / total_select_steps
+        avg_branch_loss = total_branch_loss / total_branch_steps
+        avg_select_acc = total_select_corrects / total_select_steps
+        avg_branch_acc = total_branch_corrects / total_branch_steps
 
         end_time = time.time()
         duration = end_time - start_time
@@ -154,9 +131,6 @@ def train():
                 writer.add_scalar('Epoch_Count/Total_Branch_Steps', total_branch_steps, epoch)
                 writer.add_scalar('Epoch_Time/Duration', duration, epoch)
                 
-                # 记录学习率
-                current_lr = optimizer.param_groups[0]['lr'] if hasattr(optimizer, 'param_groups') else 1e-4
-                writer.add_scalar('Epoch_Config/Learning_Rate', current_lr, epoch)
 
     
     # 关闭TensorBoard writer（只在主进程）

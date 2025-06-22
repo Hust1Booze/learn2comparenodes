@@ -1,11 +1,32 @@
 import os
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import glob
 import re
 import torch.nn.functional as F
 import random
+
+def simple_collate_fn(batch):
+    """
+    简单的collate函数，只pad sequence_data到相同长度
+    Args:
+        batch: list of sequence_data from dataset
+    Returns:
+        padded_sequence_data: list of padded sequences
+    """
+    # 找到batch中的最大序列长度
+    max_seq_len = max(len(seq) for seq in batch)
+    
+    # 对每个序列进行padding
+    padded_batch = []
+    for seq in batch:
+        seq_len = len(seq)
+        # 用None填充到最大长度
+        padded_seq = seq + [None] * (max_seq_len - seq_len)
+        padded_batch.append(padded_seq)
+    
+    return padded_batch
 
 class BnBSequentialDataset(Dataset):
     def __init__(self, data_dir, max_samples=None):
@@ -83,7 +104,7 @@ class BnBSequentialDataset(Dataset):
                 # 存储原始GNN输入数据
                 gnn_input = torch.load(pt)
                 sequence_data.append({
-                    'type': 'gnn_state',
+                    'type': 'state',
                     'data': gnn_input,
                     'reward': reward_accum
                 })
@@ -91,11 +112,11 @@ class BnBSequentialDataset(Dataset):
                 state_embedded = True
 
                 #default select node 1
-                sequence_data.append({
-                    'type': 'node_idx',
-                    'data': 1,
-                    'candidates' : None
-                })
+                # sequence_data.append({
+                #     'type': 'select',
+                #     'data': 1,
+                #     'candidates' : []
+                # })
 
                 # 添加奖励token
                 sequence_data.append({
@@ -105,8 +126,8 @@ class BnBSequentialDataset(Dataset):
 
 
 
-            elif "selected" in name and state_embedded:
-                node_idx = int(re.findall(r'node_(\d+)_selected', name)[0])
+            elif "select" in name and state_embedded:
+                node_idx = int(re.findall(r'select_(\d+)', name)[0])
                 
                 cand_nodes = torch.load(pt),
 
@@ -114,7 +135,7 @@ class BnBSequentialDataset(Dataset):
                 sequence_data.append({
                     'type': 'select',
                     'data': node_idx,
-                    'candidates' : cand_nodes
+                    'candidate' : cand_nodes
                 })
 
                 reward_accum += 1
@@ -138,8 +159,9 @@ class BnBSequentialDataset(Dataset):
                 # 更新最后的奖励数据
                 sequence_data[-1]['data'] = reward_accum
 
-            elif "branchinfo" in name and state_embedded:
+            elif "branch" in name and state_embedded:
                 info = torch.load(pt)
+                #node_number = info["node_number"]
                 branch_var_idx = info["selected_var_index"]
                 cand_var_idx = info["candidate_indices"]
                 scores = info["scores"]
@@ -149,75 +171,29 @@ class BnBSequentialDataset(Dataset):
                 # 存储分支变量数据
                 sequence_data.append({
                     'type': 'branch',
-                    'action': branch_var_idx,
+                    #'node_number':node_number,
+                    'data': branch_var_idx,
                     'candidate': cand_var_idx,
                     'score': scores
                 })
                 reward_accum += 1
 
-            elif "branch_on" in name and state_embedded:
-                match = re.search(r'branch_on_\d+_to_(\d+)\.pt', name)
+            elif "parent" in name and state_embedded:
+                match = re.search(r'parent_\d+_to_(\d+)\.pt', name)
                 node_idx = int(match.group(1))
-                  
+                #parent_node_idx = int(match.group(0))  
                 child_node = torch.load(pt)
                 # 存储子节点数据
                 sequence_data.append({
                     'type': 'node',
-                    'data': child_node
+                    'data': child_node,
+                    'node_id': node_idx,
+                    #'parent_node_number': parent_node_idx
                 })
 
 
         return sequence_data
     
-def bnb_collate(batch, pad_value=0.0):
-    """
-    batch: list of (sequence_data, type_ids_tensor, actions_tensor, candidates, branch_scores)
-    现在sequence_data是原始数据列表，需要在训练时通过模型处理
-    """
-    sequence_data_list, type_ids, actions, candidates, branch_scores = zip(*batch)
-
-    max_len = max(len(seq_data) for seq_data in sequence_data_list)
-
-    padded_typeids = []
-    padded_actions = []
-    padded_candidates = []
-    padded_branch_scores = []
-    attention_masks = []
-    padded_sequence_data = []
-
-    for seq_data, tid, act, cand, scores in zip(sequence_data_list, type_ids, actions, candidates, branch_scores):
-        pad_len = max_len - len(seq_data)
-
-        # Pad type_ids and actions
-        padded_tid = F.pad(tid, pad=(0, pad_len), value=pad_value)
-        padded_act = F.pad(act, pad=(0, pad_len), value=pad_value)
-
-        # Pad sequence_data with dummy entries
-        padded_seq_data = seq_data + [{'type': 'padding', 'data': 0}] * pad_len
-
-        # pad candidates: list[list[int]] → list of list
-        padded_cand = cand + [[-1]] * pad_len  # keep consistent with structure
-        
-        # pad branch scores: list[list[float]] → list of list
-        padded_scores = scores + [[0.0]] * pad_len # pad with zeros
-
-        mask = torch.cat([torch.ones(len(seq_data)), torch.zeros(pad_len)])
-
-        padded_sequence_data.append(padded_seq_data)
-        padded_typeids.append(padded_tid)
-        padded_actions.append(padded_act)
-        padded_candidates.append(padded_cand)
-        padded_branch_scores.append(padded_scores)
-        attention_masks.append(mask)
-
-    return (
-        padded_sequence_data,             # [B, L] (list[list[dict]])
-        torch.stack(padded_typeids),      # [B, L]
-        torch.stack(padded_actions),      # [B, L]
-        padded_candidates,                # [B, L] (list[list])
-        padded_branch_scores,             # [B, L] (list[list])
-        torch.stack(attention_masks),     # [B, L]
-    )
 
 def calculate_average_reward_static(dataset):
     """
