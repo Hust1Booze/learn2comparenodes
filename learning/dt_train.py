@@ -71,7 +71,7 @@ def train():
         print(f"Average reward: {avg_reward}")
     
     # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=bnb_collate)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
    
     best_loss = float('inf')
     patience = 1000
@@ -92,17 +92,9 @@ def train():
         start_time = time.time()
 
         for step, batch in enumerate(dataloader):
-            # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
-            sequence_data, type_ids, actions, candidates, branch_scores, attention_mask = batch
-            
-            # 将非tensor数据移动到设备 - sequence_data是list不需要移动
-            type_ids = type_ids.to(model_engine.device)
-            actions = actions.to(model_engine.device)
-            attention_mask = attention_mask.to(model_engine.device)
-
-            select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc = model_engine(
-                sequence_data, type_ids, attention_mask, actions, candidates, branch_scores
-            )
+            sequence_data = batch
+        
+            select_loss, branch_loss, select_steps, branch_steps, select_acc, branch_acc = model_engine(sequence_data)
 
             total_loss = select_loss*select_loss_weight + branch_loss*branch_loss_weight
 

@@ -88,52 +88,34 @@ class BnBSequentialDataset(Dataset):
                     'reward': reward_accum
                 })
                 
-                # 暂时用占位符长度，后续会被模型的实际输出替换
-                # 注意：这里我们只添加一个token代表整个状态
-                state_length = len(sequence_data)  # 记录状态token的位置
-                type_ids.append(1)  # type 1 = state
-                actions.append(-1)
-                candidates.append([-1])
                 state_embedded = True
-                
+
+                #default select node 1
+                sequence_data.append({
+                    'type': 'node_idx',
+                    'data': 1,
+                    'candidates' : None
+                })
+
                 # 添加奖励token
                 sequence_data.append({
                     'type': 'reward',
                     'data': reward_accum
                 })
-                type_ids.append(3)  # type 3 = reward      
-                actions.append(-1)       
-                candidates.append([-1])
+
+
 
             elif "selected" in name and state_embedded:
                 node_idx = int(re.findall(r'node_(\d+)_selected', name)[0])
                 
+                cand_nodes = torch.load(pt),
+
                 # 存储节点索引数据
                 sequence_data.append({
-                    'type': 'node_idx',
-                    'data': node_idx
+                    'type': 'select',
+                    'data': node_idx,
+                    'candidates' : cand_nodes
                 })
-                type_ids.append(2)  # type 2 = select
-
-                # 找到 node_idx 在 sequence 中的位置
-                select_token_position = 1
-                for i in range(len(actions)):
-                    if type_ids[i] == 5 and actions[i] == node_idx:
-                        select_token_position = i
-                        break
-                
-                actions.append(select_token_position)
-
-                cand_nodes = torch.load(pt)
-                cand_node_idx_in_sequence = []
-                for i in range(len(type_ids)):
-                    if type_ids[i] == 5 and actions[i] in cand_nodes:
-                        cand_node_idx_in_sequence.append(i)
-
-                if len(cand_node_idx_in_sequence) != len(cand_nodes) and node_idx != 1:
-                    print("error in select candidates")
-                
-                candidates.append(cand_node_idx_in_sequence)
 
                 reward_accum += 1
                 # 添加奖励token
@@ -141,19 +123,16 @@ class BnBSequentialDataset(Dataset):
                     'type': 'reward',
                     'data': reward_accum
                 })
-                type_ids.append(3)  # type 3 = reward
-                actions.append(-1)  
-                candidates.append([-1])
 
             elif "bestsolfound" in name and state_embedded:
-                if type_ids[-1] != 3:
+                if sequence_data[-1]['type'] != 'reward':
                     print("error in reward")
                 reward_accum -= 100
                 # 更新最后的奖励数据
                 sequence_data[-1]['data'] = reward_accum
                 
             elif "nodeinfeasible" in name and state_embedded:
-                if type_ids[-1] != 3:
+                if sequence_data[-1]['type'] != 'reward':
                     print("error in reward")
                 reward_accum -= 10
                 # 更新最后的奖励数据
@@ -166,16 +145,14 @@ class BnBSequentialDataset(Dataset):
                 scores = info["scores"]
                 if len(cand_var_idx) != len(scores):
                     print("error in branch scores")
-                branch_scores.append(scores)
 
                 # 存储分支变量数据
                 sequence_data.append({
-                    'type': 'branch_var',
-                    'data': branch_var_idx
+                    'type': 'branch',
+                    'action': branch_var_idx,
+                    'candidate': cand_var_idx,
+                    'score': scores
                 })
-                type_ids.append(4)  # type 4 = branch
-                actions.append(branch_var_idx) 
-                candidates.append(cand_var_idx) 
                 reward_accum += 1
 
             elif "branch_on" in name and state_embedded:
@@ -185,29 +162,12 @@ class BnBSequentialDataset(Dataset):
                 child_node = torch.load(pt)
                 # 存储子节点数据
                 sequence_data.append({
-                    'type': 'child_node',
+                    'type': 'node',
                     'data': child_node
                 })
-                type_ids.append(5)  # type 5 = node
-                actions.append(node_idx) 
-                candidates.append([-1])
 
-        # 转换为tensor
-        type_ids_tensor = torch.tensor(type_ids, dtype=torch.long)
-        actions_tensor = torch.tensor(actions, dtype=torch.long)
 
-        # 验证 type_ids_tensor 为 4 的位置对应的 candidates 和 branch_scores 长度是否一致
-        branch_positions = (type_ids_tensor == 4).nonzero(as_tuple=True)[0]
-        branch_step = 0
-        for pos in branch_positions:
-            pos_idx = pos.item()
-            if len(candidates[pos_idx]) != len(branch_scores[branch_step]):
-                print(f"Error: At position {pos_idx} (branch step {branch_step}), candidates length ({len(candidates[pos_idx])}) != branch_scores length ({len(branch_scores[branch_step])})")
-                print(f"Candidates: {candidates[pos_idx]}")
-                print(f"Branch scores: {branch_scores[branch_step]}")
-            branch_step += 1
-
-        return sequence_data, type_ids_tensor, actions_tensor, candidates, branch_scores
+        return sequence_data
     
 def bnb_collate(batch, pad_value=0.0):
     """

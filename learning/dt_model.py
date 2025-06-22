@@ -1,99 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from dt_dataset import BnBSequentialDataset, bnb_collate
-from torch_geometric.nn import GraphConv
-import random
-
-class GNNEncoder(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        
-        self.emb_size = emb_size = 32 #uniform node feature embedding dim
-        
-        hidden_dim1 = 32
-        hidden_dim2 = 32
-        hidden_dim3 = 32
-        
-        # static data
-        cons_nfeats = 4
-        edge_nfeats = 1
-        var_nfeats = 6
-        
-
-        # CONSTRAINT EMBEDDING
-        self.cons_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(cons_nfeats),
-            torch.nn.Linear(cons_nfeats, emb_size),
-            torch.nn.ReLU(),
-        )
-
-        # EDGE EMBEDDING
-        self.edge_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(edge_nfeats),
-        )
-
-        # VARIABLE EMBEDDING
-        self.var_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(var_nfeats),
-            torch.nn.Linear(var_nfeats, emb_size),
-            torch.nn.ReLU(),
-        )
-        
-        self.bounds_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(2),
-            torch.nn.Linear(2,2),
-            torch.nn.ReLU(),
-        )
-
-        self.convs = []
-        self.conv1 = GraphConv((emb_size, emb_size), hidden_dim1 )
-        self.conv2 = GraphConv((hidden_dim1, hidden_dim1), hidden_dim2 )
-        self.conv3 = GraphConv((hidden_dim2, hidden_dim2), hidden_dim3 )
-        
-        self.convs = [self.conv1, self.conv2]
-        
-        out_size = hidden_dim3 if len(self.convs)==3 else emb_size
-        
-        self.final_mlp = torch.nn.Sequential( 
-                            torch.nn.Linear(2*out_size+2, 1, bias=False),
-                            torch.nn.Sigmoid()
-                            )
-        
-       
-    def forward(self, constraint_features, edge_indices, edge_features, 
-                       variable_features, bbounds, depth):
-
-        #Assume edge indice var to cons, constraint_mask of shape [Nconvs]       
-        variable_features = self.var_embedding(variable_features)
-        constraint_features = self.cons_embedding(constraint_features)
-        edge_features = self.edge_embedding(edge_features)
-        bbounds = self.bounds_embedding(bbounds)
-         
-        edge_indices_reversed = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
-              
-        for conv in self.convs:           
-            #Var to cons
-            constraint_features_next = F.relu(conv((variable_features, constraint_features), 
-                                              edge_indices,
-                                              edge_weight=edge_features,
-                                              size=(variable_features.size(0), constraint_features.size(0))))
-            
-            #cons to var 
-            variable_features = F.relu(conv((constraint_features, variable_features), 
-                                      edge_indices_reversed,
-                                      edge_weight=edge_features,
-                                      size=(constraint_features.size(0), variable_features.size(0))))
-            
-            constraint_features = constraint_features_next
-            
-            constraint_avg = torch.mean(constraint_features, axis=0, keepdim=True)
-            variable_avg = torch.mean(variable_features, axis=0, keepdim=True)
-            
-        #return torch.cat((variable_avg, constraint_avg, bbounds), dim=1)
-        return variable_features
-    
+from gnnencoder import GNNEncoder
 
 
 class DTModel(nn.Module):
@@ -140,10 +48,6 @@ class DTModel(nn.Module):
             nn.Linear(d_model // 2, 1)
         )
 
-    def generate_causal_mask(self, sz, device):
-        """生成因果掩码，防止看到未来的token"""
-        mask = torch.triu(torch.ones(sz, sz, device=device), diagonal=1).bool()
-        return mask
     
     def process_sequence_data(self, sequence_data_batch, type_ids, device, actions=None, candidates=None):
         """
@@ -279,31 +183,50 @@ class DTModel(nn.Module):
                     
         return padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping, padded_actions, padded_candidates
 
-    def forward(self, sequence_data_batch, type_ids, attention_mask, actions, candidates, branch_scores):
-        # 首先将原始数据转换为嵌入向量
-        device = type_ids.device
-        padded_embeddings, padded_type_ids, padded_attention_mask, position_mapping, padded_actions, padded_candidates = self.process_sequence_data(sequence_data_batch, type_ids, device, actions, candidates)
+    def forward(self, sequence_data):
         
-        # 使用padded embeddings进行transformer编码
-        type_embed = self.type_embedding(padded_type_ids)
-        pos_ids = torch.arange(padded_embeddings.size(1), device=device).unsqueeze(0).expand(padded_embeddings.size(0), -1)
-        pos_embed = self.pos_embedding(pos_ids)
-
-        x = padded_embeddings + type_embed + pos_embed
-
-        select_loss = torch.tensor(0.0, device=device)
-        branch_loss = torch.tensor(0.0, device=device)
-        select_steps = 0
-        branch_steps = 0
-        select_correct = 0
-        branch_correct = 0
-
-        # 现在使用padded的sequence进行处理
-        B, T = padded_type_ids.shape
-        
-        for b in range(B):  # 遍历 batch 中的每个 sample
+        for sequence in range(sequence_data):  # 遍历 batch 中的每个 sample
             branch_steps = 0
             branch_ids = -1
+            squence_emb = None
+
+            for item in range(sequence):
+                type = item['type']
+                if data_type == 'gnn_state':
+                    gnn_input = data_item['data']
+                    # 将GNN输入移到正确的设备
+                    gnn_input = [x.to(device) for x in gnn_input]
+                    state_emb = self.gnn_encoder(*gnn_input)  # [num_vars, D]
+
+                    
+                elif data_type == 'reward':
+                    reward_value = data_item['data']
+                    reward_tensor = torch.tensor([reward_value], dtype=torch.float32, device=device)
+                    reward_emb = self.reward_embedding(reward_tensor)  # [1, D]
+                    squence_emb =  torch.cat(squence_emb,reward_emb, dim=0)
+                    
+                elif data_type == 'node_idx':
+
+                    candidate = candidates[b][t]
+                    node_idx = data_item['data']
+                    node_idx_tensor = torch.tensor([node_idx], dtype=torch.long, device=device)
+                    node_idx_emb = self.node_idx_embedding(node_idx_tensor)  # [1, D]
+                    squence_emb =  torch.cat(squence_emb,node_idx_emb, dim=0)
+                    
+                elif data_type == 'branch_var':
+
+                    candidate = candidates[b][t]
+                    branch_var_idx = data_item['data']
+                    branch_var_tensor = torch.tensor([branch_var_idx], dtype=torch.long, device=device)
+                    branch_var_emb = self.branch_var_embedding(branch_var_tensor)  # [1, D]
+                    squence_emb =  torch.cat(squence_emb,branch_var_emb, dim=0)
+                    
+                elif data_type == 'child_node':
+                    child_node_data = data_item['data']
+                    child_node_tensor = child_node_data.to(device)
+                    child_node_emb = self.node_embedding(child_node_tensor)  # [D]
+                    squence_emb =  torch.cat(squence_emb,child_node_emb, dim=0)
+
             for t in range(T):  # 遍历该 sample 的所有时间步
                 token_type = padded_type_ids[b, t].item()
                 if token_type ==4: 
