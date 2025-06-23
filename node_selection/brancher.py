@@ -110,12 +110,12 @@ class StrongBranchingRule(sp.Branchrule):
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
         # 10%的概率随机选择分支变量，90%的概率选择得分最高的变量
-        if random.random() < 0.1:
-            # 随机选择
-            best_cand_idx = random.randint(0, npriocands - 1)
-        else:
-            # 选择得分最高的变量（保持原逻辑）
-            pass  # best_cand_idx 已经在上面的循环中确定
+        # if random.random() < 0.1:
+        #     # 随机选择
+        #     best_cand_idx = random.randint(0, npriocands - 1)
+        # else:
+        #     # 选择得分最高的变量（保持原逻辑）
+        #     pass  # best_cand_idx 已经在上面的循环中确定
 
         # Branch on the variable with the largest score
         down_child, eq_child, up_child = self.model.branchVarVal(

@@ -5,9 +5,7 @@ from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
 from dt_model import DTModel
 import time
-import gc
 import deepspeed
-import argparse
 import os
 from torch.utils.tensorboard import SummaryWriter
 import datetime
@@ -16,7 +14,7 @@ import datetime
                           
 def train():
 
-    batch_size = 2
+    batch_size = 8
     
     # 解析命令行参数（DeepSpeed需要）
     ds_config = {
@@ -31,17 +29,20 @@ def train():
             "enabled": False
         },
         "zero_optimization": {
-            "stage": 1,
-            "offload_optimizer": {
-                "device": "cpu"
-            }
+            "stage": 2,
+            # "offload_optimizer": {
+            #     "device": "cpu"
+            # }
         }
     }
 
     model = DTModel()
+    print(model)
 
+    model.print_model_info()
+    
     # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
+    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/transformer_foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
     
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(

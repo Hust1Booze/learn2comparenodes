@@ -14,14 +14,14 @@ root_dir=$(pwd)
 echo "root_dir:"${root_dir}
 
 
-python problem_generation/gisp.py |tee logs/gen_problem.txt
+# python problem_generation/gisp.py |tee logs/gen_problem.txt
 
-python node_selection/behaviour_gen.py |tee logs/gen_new_data_1.txt
+python node_selection/behaviour_gen.py |tee logs/gen_new_data.txt
 
-python node_selection/behaviour_gen.py |tee logs/gen_new_data_2.txt
+# python node_selection/behaviour_gen.py |tee logs/gen_new_data_2.txt
 
-python node_selection/behaviour_gen.py |tee logs/gen_new_data_3.txt
+# python node_selection/behaviour_gen.py |tee logs/gen_new_data_3.txt
 
-python node_selection/behaviour_gen.py |tee logs/gen_new_data_4.txt
+# python node_selection/behaviour_gen.py |tee logs/gen_new_data_4.txt
 
 # python learning/dt_train.py |tee logs/train_log.txt

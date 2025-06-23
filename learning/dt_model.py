@@ -298,3 +298,27 @@ class DTModel(nn.Module):
         else:
             print("why no vars!")
             return []
+
+    def print_model_info(self):
+        """
+        打印模型的参数量信息
+        """
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        
+        print(f"=" * 50)
+        print(f"DTModel 参数统计:")
+        print(f"总参数量: {total_params:,}")
+        print(f"可训练参数量: {trainable_params:,}")
+        print(f"模型大小: {total_params * 4 / 1024 / 1024:.2f} MB (假设float32)")
+        print(f"=" * 50)
+        
+        # 详细打印每个模块的参数量
+        print(f"\n详细参数分布:")
+        for name, module in self.named_modules():
+            if len(list(module.children())) == 0:  # 只打印叶子模块
+                params = sum(p.numel() for p in module.parameters())
+                if params > 0:
+                    print(f"{name}: {params:,} 参数")
+        
+        return total_params, trainable_params
