@@ -2,142 +2,121 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
+from dt_dataset import BnBSequentialDataset, calculate_average_reward, calculate_average_reward_static, simple_collate_fn
 from dt_model import DTModel
 import time
-import deepspeed
+import gc
 import os
-from torch.utils.tensorboard import SummaryWriter
-import datetime
+import numpy as np
 
-# CUDA_VISIBLE_DEVICES = int(os.environ[“LOCAL_RANK”])
-                          
 def train():
-
-    batch_size = 8
+    # 检查CUDA是否可用
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
     
-    # 解析命令行参数（DeepSpeed需要）
-    ds_config = {
-        "train_micro_batch_size_per_gpu": batch_size,
-        "optimizer": {
-            "type": "Adam",
-            "params": {
-                "lr": 1e-4
-            }
-        },
-        "fp16": {
-            "enabled": False
-        },
-        "zero_optimization": {
-            "stage": 2,
-            # "offload_optimizer": {
-            #     "device": "cpu"
-            # }
-        }
-    }
-
+    # 创建模型并移动到设备
     model = DTModel()
-    print(model)
+    model = model.to(device)
+    
+    # 创建数据集
+    dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/GISP/train", max_samples=1000)
+    
+    valid_dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/GISP/valid", max_samples=1000)
+    # 计算平均奖励
+    # avg_reward = calculate_average_reward_static(dataset)
+    # print(f"Average reward: {avg_reward}")
+    
+    # 创建DataLoader
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True,collate_fn=simple_collate_fn)
 
-    model.print_model_info()
+    valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=True,collate_fn=simple_collate_fn)
     
-    # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/transformer_foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
+    # 创建优化器
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     
-    # DeepSpeed 初始化
-    model_engine, optimizer, _, _ = deepspeed.initialize(
-        model=model,
-        model_parameters=model.parameters(),
-        config=ds_config
-    )
-    
-    # 只在主进程创建TensorBoard writer
-    writer = None
-    if model_engine.global_rank == 0:
-        # 创建TensorBoard writer
-        current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
-        log_dir = f'./logs/train_{current_time}'
-        
-        # 确保日志目录存在
-        os.makedirs(log_dir, exist_ok=True)
-        
-        writer = SummaryWriter(log_dir)
-        print(f"TensorBoard日志将保存到: {log_dir}")
-    
-    # 计算平均奖励（使用静态方法，不需要模型前向传播）
-    if model_engine.global_rank == 0:  # 只在主进程打印
-        avg_reward = calculate_average_reward_static(dataset)
-        print(f"Average reward: {avg_reward}")
-    
-    # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
-   
 
-    select_loss_weight = 0.05
+    select_loss_weight = 0.1
     branch_loss_weight = 1
     
+    # 创建检查点目录
+    os.makedirs("./checkpoints", exist_ok=True)
+    
     for epoch in range(100000):
-        model_engine.train()
+        model.train()
         total_select_loss = 0
         total_branch_loss = 0
-        total_select_steps = 0
-        total_branch_steps = 0
-        total_branch_corrects = 0
-        total_select_corrects = 0
-
+        total_step = 0
+        total_select_acc = []
+        total_branch_acc = []
         start_time = time.time()
 
-        for step, batch in enumerate(dataloader):
-            sequence_data = batch
-        
-            select_loss, branch_loss, select_steps, branch_steps, select_corrects, branch_corrects  = model_engine(sequence_data, model_engine.device)
+        for batch in dataloader:
+            # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
+            states, sequence_data = batch
+            # 清零梯度
+            optimizer.zero_grad()
 
-            total_loss = select_loss*select_loss_weight + branch_loss*branch_loss_weight
+            # 前向传播
+            select_loss, branch_loss ,select_acc, branch_acc = model(states, sequence_data, device)
 
-            model_engine.backward(total_loss)
-            model_engine.step()
+            # 计算总损失
+            total_loss = select_loss * select_loss_weight + branch_loss * branch_loss_weight
+
+            # 反向传播
+            total_loss.backward()
+            
+            # 更新参数
+            optimizer.step()
 
             total_select_loss += select_loss.item()
             total_branch_loss += branch_loss.item()
-            total_select_steps += select_steps
-            total_branch_steps += branch_steps
-            total_select_corrects += select_corrects
-            total_branch_corrects  += branch_corrects
-
-
+            total_select_acc.append(select_acc)
+            total_branch_acc.append(branch_acc)
+            total_step += 1
         # 计算平均指标
-        avg_select_loss = total_select_loss / total_select_steps
-        avg_branch_loss = total_branch_loss / total_branch_steps
-        avg_select_acc = total_select_corrects / total_select_steps
-        avg_branch_acc = total_branch_corrects / total_branch_steps
-
+        avg_select_loss = total_select_loss / total_step
+        avg_branch_loss = total_branch_loss / total_step
+        avg_select_acc = np.mean(total_select_acc)
+        avg_branch_acc = np.mean(total_branch_acc)
         end_time = time.time()
         duration = end_time - start_time
 
-        # 只在主进程打印
-        if model_engine.global_rank == 0:
-            print(f"Epoch {epoch}:")
-            print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
-            print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
-            print(f"  Time: {duration:.2f} seconds", flush= True)
-            
-            # 记录epoch级别的指标到TensorBoard（只在主进程）
-            if writer is not None:
-                writer.add_scalar('Epoch_Loss/Select', avg_select_loss, epoch)
-                writer.add_scalar('Epoch_Loss/Branch', avg_branch_loss, epoch)
-                writer.add_scalar('Epoch_Loss/Total', avg_select_loss + avg_branch_loss, epoch)
-                writer.add_scalar('Epoch_Accuracy/Select', avg_select_acc, epoch)
-                writer.add_scalar('Epoch_Accuracy/Branch', avg_branch_acc, epoch)
-                writer.add_scalar('Epoch_Count/Total_Select_Steps', total_select_steps, epoch)
-                writer.add_scalar('Epoch_Count/Total_Branch_Steps', total_branch_steps, epoch)
-                writer.add_scalar('Epoch_Time/Duration', duration, epoch)
-                
+        # 打印训练信息
+        print(f"Epoch {epoch}:")
+        print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
+        print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
+        print(f"  Time: {duration:.2f} seconds", flush=True)
 
-    
-    # 关闭TensorBoard writer（只在主进程）
-    if model_engine.global_rank == 0 and writer is not None:
-        writer.close()
-        print(f"TensorBoard日志已保存到: {log_dir}")
+        # eval
+        if epoch % 10 ==0:
+            model.eval()
+            valid_select_loss = 0
+            valid_branch_loss = 0
+            valid_step = 0
+            valid_select_acc = []
+            valid_branch_acc = []
+            for batch in valid_dataloader:
+                # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
+                states, sequence_data = batch
+                # 前向传播
+                select_loss, branch_loss ,select_acc, branch_acc = model(states, sequence_data, device)
+                valid_select_loss += select_loss.item()
+                valid_branch_loss += branch_loss.item()
+                valid_select_acc.append(select_acc)
+                valid_branch_acc.append(branch_acc)
+                valid_step += 1
+            # 计算平均指标
+            avg_valid_select_loss = valid_select_loss / valid_step
+            avg_valid_branch_loss = valid_branch_loss / valid_step
+            avg_valid_select_acc = np.mean(valid_select_acc)
+            avg_valid_branch_acc = np.mean(valid_branch_acc)
+
+            print(f"Epoch eval{epoch}:")
+            print(f"  Select Loss: {avg_valid_select_loss:.4f}, Branch Loss: {avg_valid_branch_loss:.4f}")
+            print(f"  Select Acc: {avg_valid_select_acc:.4f}, Branch Acc: {avg_valid_branch_acc:.4f}")
+
+
+    print("Training completed!")
 
 if __name__ == "__main__":
-    train()
+    train() 

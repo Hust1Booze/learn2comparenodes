@@ -10,7 +10,7 @@ from recorders import LPFeatureRecorder, CompFeaturizer, CompFeaturizerSVM
 import time
 from brancher import StrongBranchingRule
 from selector import OracleNodeSelRecorder, ScipEvent
-
+from saver import SequenceSaver
 
 def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_model):
     
@@ -31,12 +31,13 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_mod
     
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
 
-    save_dir = save_dir + str(instance).split("/")[-1] + f"_{int(time.time())}"
+    save_dir = save_dir + '/' + str(instance).split("/")[-1] + f"_{int(time.time())}"
+    sequence_saver = SequenceSaver(save_dir)
 
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
     comp_behaviour_saver_svm = CompFeaturizerSVM(model, f"{save_dir_svm}", instance_name=str(instance).split("/")[-1])
     
-    oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,save_dir)
+    oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm, sequence_saver, save_dir)
     oracle_ns.setOptsol(optsol)
     oracle_ns.set_LP_feature_recorder(LPFeatureRecorder(model, device))
         
@@ -44,10 +45,10 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_mod
     model.includeNodesel(oracle_ns, "oracle_recorder", "testing",
                          536870911,  536870911)
     
-    scipEvent = ScipEvent(model,save_dir,device)
+    scipEvent = ScipEvent(model,sequence_saver,device)
     model.includeEventhdlr(scipEvent, "ScipEvent", "Event handler when nodes are pouned")
 
-    brancher = StrongBranchingRule(model,save_dir)
+    brancher = StrongBranchingRule(model,sequence_saver,save_dir)
     model.includeBranchrule(
     branchrule=brancher,
     name="BNB_Brancher",
@@ -56,6 +57,9 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_mod
 
     # Run the optimizer
     model.optimize()
+
+    sequence_saver.save()
+
     print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons' )
     
     with open("nnodes.csv", "a+") as f:
@@ -104,7 +108,7 @@ if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
     problem = 'GISP'
-    data_partitions = ['train'] #dont change
+    data_partitions = ['valid'] #dont change
     n_cpu = 8
     n_instance = -1
     device = 'cpu'

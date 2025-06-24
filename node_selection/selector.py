@@ -10,12 +10,13 @@ import time
 
 class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
     
-    def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,save_dir):
+    def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,sequence_saver,save_dir):
         super().__init__(oracle_type)
         self.counter = 0
         self.comp_behaviour_saver = comp_behaviour_saver
         self.comp_behaviour_saver_svm = comp_behaviour_saver_svm
         self.save_dir = save_dir
+        self.saver = sequence_saver
 
     def set_LP_feature_recorder(self, LP_feature_recorder):
         self.comp_behaviour_saver.set_LP_feature_recorder(LP_feature_recorder)
@@ -31,22 +32,21 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         select_node_number = select_node['selnode'].getNumber()
         if select_node_number == 1:
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, select_node['selnode'])
-            current_time = time.time()
-            file_path = self.save_dir + f"/{current_time:.4f}_origin_milp.pt"
-            torch.save(g, file_path)
+            self.saver.milp_state = g
         leaves, children, siblings = self.model.getOpenNodes()
         open_nodes = leaves + children + siblings
 
         open_nodes_number = []
         for open_node in open_nodes:
             open_nodes_number.append(open_node.getNumber())
-        if not os.path.exists(self.save_dir) :
-            os.makedirs(self.save_dir , exist_ok=True)
-        current_time = time.time()
 
-        file_path = self.save_dir + f"/{current_time:.4f}_select_{select_node_number}.pt"
-        # print(f"Node: {select_node_number} , !!!!select node.")
-        torch.save(open_nodes_number, file_path)
+        data = {
+            "type" : "select",
+            "data" : [select_node_number],
+            "cand" : open_nodes_number
+        }
+
+        self.saver.squence.append(data)
  
         return select_node        
         
@@ -78,11 +78,10 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
             
         
 class ScipEvent(Eventhdlr):
-    def __init__(self, model, save_dir,device):
+    def __init__(self, model,sequence_saver,device):
         Eventhdlr.__init__(model)
         self.count = 0
         self.model = model
-        self.save_dir = save_dir
         self.device = device
         varrs = model.getVars() # equal to variables nums in bipartite graph representation
         original_conss = model.getConss()
@@ -90,8 +89,8 @@ class ScipEvent(Eventhdlr):
         self.original_conss = original_conss
         self.var2idx = dict([ (str_var, idx) for idx, var in enumerate(self.varrs) for str_var in [str(var)]  ])
         # print(f'the total vars {self.var2idx}')
-        if not os.path.exists(self.save_dir) :
-            os.makedirs(self.save_dir , exist_ok=True)
+
+        self.saver = sequence_saver
 
     def eventinit(self):
         self.model.catchEvent(SCIP_EVENTTYPE.NODESOLVED, self)
@@ -110,17 +109,9 @@ class ScipEvent(Eventhdlr):
         # print(f"Node: {node_number} , {event.getName()}")
 
         if(event.getName() == 'BESTSOLFOUND'):
-            current_time = time.time()
-
-            file_path = self.save_dir + f"/{current_time:.4f}_bestsolfound.pt"
-            data = {}
-            torch.save(data, file_path)
+            pass
         if(event.getName() == 'NODEINFEASIBLE'):
-            current_time = time.time()
-
-            file_path = self.save_dir + f"/{current_time:.4f}_nodeinfeasible.pt"
-            data = {}
-            torch.save(data, file_path)
+            pass
         if(event.getName() == 'NODEFOCUSED'):
             pass
         if(event.getName() == 'NODEBRANCHED'):
@@ -142,9 +133,15 @@ class ScipEvent(Eventhdlr):
                             var_idx = self.var2idx['t_' + str(bvar)]
                         else:
                             var_idx = self.var2idx[ '_'.join(str(bvar).split('_')[1:]) ] 
-                    child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]], device=self.device).float()
-                    current_time = time.time()
-                    file_path = self.save_dir + f"/{current_time:.4f}_parent_{node_number}_to_{child_number}.pt"
-                    torch.save(child_node, file_path)
+
+                    #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
+                    child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]
+                    data = {
+                        "type" : "node",
+                        "data" : child_node,
+                        "cand" : None,
+                        "node_number" : child_number
+                    }
+                    self.saver.squence.append(data)
         
 

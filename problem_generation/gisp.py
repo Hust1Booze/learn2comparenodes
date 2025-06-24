@@ -131,9 +131,9 @@ if __name__ == "__main__":
     alphaE2 = 0.5
     timelimit = 7200.0
     solveInstance = True
-    n_instance = 1000
+    n_instance = 50
     seed = 0
-    data_partition = 'train'
+    data_partition = 'test'
     
 
     # seed = 0
@@ -172,6 +172,8 @@ if __name__ == "__main__":
     
     exp_dir = exp_dir + data_partition
     lp_dir= os.path.join(os.path.dirname(__file__), exp_dir)
+
+    print(f'save dir: {lp_dir}')
     try:
         os.makedirs(lp_dir)
     except FileExistsError:

@@ -49,7 +49,7 @@ class DTModel(nn.Module):
         )
 
     
-    def forward(self, sequence_data, device):
+    def forward(self, states, sequence_data, device):
         
         select_loss = torch.tensor(0.0, device=device)
         branch_loss = torch.tensor(0.0, device=device)
@@ -58,113 +58,254 @@ class DTModel(nn.Module):
         select_corrects = 0
         branch_corrects = 0
 
-        for sequence in sequence_data:  # 遍历 batch 中的每个 sample
-            squence_emb = None
-            # record each item in sequence is node or not, node with its id, else -1
-            sequence_node_id = []
-            state_emb = None
-            for item in sequence:
-                if item is None:
-                    continue
-                type = item['type']
-                if type == 'state':
-                    gnn_input = item['data']
-                    # 将GNN输入移到正确的设备
-                    gnn_input = [x.to(device) for x in gnn_input]
-                    state_emb = self.gnn_encoder(*gnn_input)  # [num_vars, D]
+        select_sequences = sequence_data["select_sequences"].to(device)
+        branch_sequences = sequence_data["branch_sequences"].to(device)
+        select_cands = sequence_data["select_cands"].to(device)
+        branch_cands = sequence_data["branch_cands"].to(device)
+        node_ids = sequence_data["node_ids"].to(device)
+        types = sequence_data["types"].to(device)
+        select_actions = sequence_data["select_actions"]
+        branch_actions = sequence_data["branch_actions"]
 
-                    
-                elif type == 'select':
-                    candidates = item['candidate']
-                    select_node_id = item['data']
-                    if select_node_id == 1:
-                        node_id_tensor = torch.tensor([1], dtype=torch.long, device=device)
-                        node_id_emb = self.node_idx_embedding(node_id_tensor)  # [1, D]
+        select_sequence_masks = sequence_data["select_sequence_masks"].to(device)
+        branch_sequence_masks = sequence_data["branch_sequence_masks"].to(device)
+        select_cand_masks = sequence_data["select_cand_masks"].to(device)
+        branch_cand_masks = sequence_data["branch_cand_masks"].to(device)
+        node_id_masks = sequence_data["node_id_masks"].to(device)
 
-                        #first token
-                        squence_emb = node_id_emb
-                        sequence_node_id.append(-1)
-                    else:
-                        select_logits = self.cal_select_logits(state_emb, squence_emb)
-                        loss = self.cal_select_loss(select_logits, sequence_node_id, select_node_id, candidates[0], device)
-                        select_loss += loss
-                        select_steps += 1
-                        
-                        # 计算select正确率
-                        if loss is not None:
-                            # 获取预测结果
-                            pred_logits = select_logits[candidates[0]].squeeze(-1)  # [num_candidates]
-                            pred_idx = pred_logits.argmax().item()
-                            true_idx = candidates[0].index(select_node_id)
-                            
-                            if pred_idx == true_idx:
-                                select_corrects += 1
-                    
-                        node_id_tensor = torch.tensor([select_node_id], dtype=torch.long, device=device)
-                        node_id_emb = self.node_idx_embedding(node_id_tensor)  # [1, D]
-                        squence_emb = torch.cat([squence_emb, node_id_emb], dim=0)
-                        sequence_node_id.append(-1)
-                    
-                elif type == 'branch':
-                    candidates = item['candidate']
-                    branch_var_idx = torch.tensor([item['data']], dtype=torch.long, device=device)
 
-                    branch_logits = self.cal_branch_logits(state_emb, squence_emb)
+        states_embd, states_mask = self.deal_states(states, device)
+        
+        _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
 
-                    candidates = torch.tensor(candidates, device=device, dtype=torch.long)
-                    cand_branch_logits = branch_logits[candidates]
-                    branch_loss += F.cross_entropy(cand_branch_logits.permute(1, 0), branch_var_idx)
-                    branch_steps += 1
-                    
-                    # 计算branch正确率
-                    pred_idx = cand_branch_logits.argmax().item()
+        select_sequence_embd = self.transformer(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
+        branch_sequence_embd = self.transformer(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
 
-                    if pred_idx == branch_var_idx.item():
-                        branch_corrects += 1
+        select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
+        branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
 
-                    branch_var_tensor = torch.tensor([candidates[branch_var_idx]], dtype=torch.long, device=device)
-                    branch_var_emb = self.branch_var_embedding(branch_var_tensor)  # [1, D]
-                    squence_emb = torch.cat([squence_emb, branch_var_emb], dim=0)
-                    sequence_node_id.append(-1)
-                    
-                elif type == 'node':
-                    node_id = item['node_id']
-                    child_node_emb = self.node_embedding(item['data'].to(device))  # [D]
-                    squence_emb = torch.cat([squence_emb, child_node_emb], dim=0)
-                    sequence_node_id.append(node_id)
+        # cal  loss
+        select_loss, select_acc = self.cal_select_loss(select_logits, select_cands, select_actions, node_ids)
+        branch_loss, branch_acc = self.cal_branch_loss(branch_logits, branch_cands, branch_actions)
 
-                elif type == 'reward':
-                    continue
-                    reward_value = item['data']
-                    reward_tensor = torch.tensor([reward_value], dtype=torch.float32, device=device)
-                    reward_emb = self.reward_embedding(reward_tensor)  # [1, D]
-                    squence_emb = torch.cat([squence_emb, reward_emb], dim=0)
 
-        return select_loss, branch_loss, select_steps, branch_steps, select_corrects, branch_corrects
+        return select_loss, branch_loss, select_acc, branch_acc, 
     
 
-    def cross_attention(self, query, key, value, mask=None):
+    def deal_states(self, states, device):
+        max_state_emb_len = 0
+        states_emb = []
+        for state in states:
+            gnn_input = [x.to(device) for x in state]
+            state_emb = self.gnn_encoder(*gnn_input)  # [num_vars, D]
+            states_emb.append(state_emb)
+            max_state_emb_len = max(max_state_emb_len,state_emb.shape[0])
+
+        # 对states_emb进行padding并转换为tensor
+        padded_states_emb = []
+        states_emb_masks = []
+        
+        for state_emb in states_emb:
+            state_emb_len = state_emb.shape[0]
+            d_model = state_emb.shape[1]
+            
+            # 创建padded tensor (用0填充)
+            padded_state_emb = torch.zeros(max_state_emb_len, d_model, dtype=state_emb.dtype, device=device)
+            padded_state_emb[:state_emb_len] = state_emb
+            
+            # 创建mask (True表示mask位置，False表示正常位置)
+            state_emb_mask = torch.ones(max_state_emb_len, dtype=torch.bool, device=device)
+            state_emb_mask[:state_emb_len] = False
+            
+            padded_states_emb.append(padded_state_emb)
+            states_emb_masks.append(state_emb_mask)
+        
+        # 堆叠成batch tensor
+        states_emb_tensor = torch.stack(padded_states_emb)  # [batch_size, max_state_emb_len, d_model]
+        states_emb_masks_tensor = torch.stack(states_emb_masks)  # [batch_size, max_state_emb_len]
+
+        return states_emb_tensor, states_emb_masks_tensor
+    
+
+    def combine_sequence_embd(self,select_sequences, branch_sequences, types, device):
+        select_sequence_embd = self.token_proj(select_sequences)
+        branch_sequence_embd = self.token_proj(branch_sequences)
+
+        types_embd = self.type_embedding(types)
+
+        # 创建position embedding
+        batch_size, select_seq_len, _ = select_sequence_embd.shape
+        _, branch_seq_len, _ = branch_sequence_embd.shape
+        
+        # 创建position indices
+        select_positions = torch.arange(select_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        branch_positions = torch.arange(branch_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        
+        # 获取position embeddings
+        select_pos_embd = self.pos_embedding(select_positions)
+        branch_pos_embd = self.pos_embedding(branch_positions)
+
+        # 组合所有embeddings: token + type + position
+        select_sequence_embd = select_sequence_embd + types_embd[:,:select_sequence_embd.shape[1],:] + select_pos_embd
+        branch_sequence_embd = branch_sequence_embd + types_embd[:,:branch_sequence_embd.shape[1],:] + branch_pos_embd
+
+        return select_sequence_embd,branch_sequence_embd
+
+
+    def deal_branch(self, branch_sequence_embd, branch_sequence_masks, states_embd, states_mask):
         """
-        Cross attention function
+        处理branch序列和state的交互
         Args:
-            query: [batch_size, seq_len, d_model] - sequence embeddings
-            key: [batch_size, num_vars, d_model] - state embeddings  
-            value: [batch_size, num_vars, d_model] - state embeddings
-            mask: [batch_size, seq_len, num_vars] - attention mask
+            branch_sequence_embd: [batch_size, seq_len, d_model] - branch序列embeddings
+            branch_sequence_masks: [batch_size, seq_len] - branch序列的padding mask
+            states_embd: [batch_size, num_vars, d_model] - state embeddings
+            states_mask: [batch_size, num_vars] - state的padding mask
+        Returns:
+            branch_logits: [batch_size,num_vars, 1]
+        """
+        
+        attended_output, attention_weights = \
+            self.cross_attention(states_embd, branch_sequence_embd, branch_sequence_embd, states_mask, branch_sequence_masks)
+        
+        combine_branch_embd = torch.cat([states_embd, attended_output], dim=-1) #[batch, numvars, d_model*2]
+
+        branch_logits = self.branch_head(combine_branch_embd)
+
+        return branch_logits 
+
+
+    def deal_select(self, select_sequence_embd, select_sequence_masks, states_embd, states_mask):
+        """
+        处理branch序列和state的交互
+        Args:
+            branch_sequence_embd: [batch_size, seq_len, d_model] - branch序列embeddings
+            branch_sequence_masks: [batch_size, seq_len] - branch序列的padding mask
+            states_embd: [batch_size, num_vars, d_model] - state embeddings
+            states_mask: [batch_size, num_vars] - state的padding mask
+        Returns:
+            branch_logits: [batch_size,num_vars, 1]
+        """
+        
+        attended_output, attention_weights = \
+            self.cross_attention(select_sequence_embd, states_embd, states_embd, select_sequence_masks, states_mask)
+        
+        combine_select_embd = torch.cat([select_sequence_embd, attended_output], dim=-1) #[batch, numvars, d_model*2]
+
+        select_logits = self.select_head(combine_select_embd)
+
+        return select_logits 
+
+
+    def cal_branch_loss(self, branch_logits, branch_cands, branch_actions):
+        """
+        calculate branch loss
+        Args:
+            branch_logits: [batch_size, num_vars, 1] - branch logits
+            branch_cands: [batch_size, num_candidates] - branch candidates, each is a index of branch_logits
+            branch_actions: [batch_size] - branch actions
+        Returns:
+            branch_loss: scalar - branch loss
+        """
+        batch_size, num_vars, _ = branch_logits.shape
+        num_candidates = branch_cands.shape[1]
+        
+        # 创建candidate mask: [batch_size, num_vars]
+        # True表示该位置是不是candidate， 需要mask
+        candidate_mask = torch.ones(batch_size, num_vars, dtype=torch.bool, device=branch_logits.device)
+        
+        # 使用scatter_来设置candidate位置为True
+        batch_indices = torch.arange(batch_size, device=branch_logits.device).unsqueeze(1).expand(-1, num_candidates)
+        
+        candidate_mask[batch_indices, branch_cands] = False
+        
+        # 获取logits并应用mask
+        logits = branch_logits.squeeze(-1)  # [batch_size, num_vars]
+        
+        # 将非candidate位置的logits设为-inf
+        masked_logits = logits.masked_fill(candidate_mask, float('-inf'))
+
+        batch_indices = torch.arange(batch_size, device=branch_logits.device)
+        # actions 就表示label在cands中的位置
+        target = branch_cands[batch_indices,branch_actions]      
+        # 计算交叉熵损失
+        loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
+        acc = (masked_logits.argmax(dim=-1) == target).float().mean().item()
+        return loss.mean(), acc
+
+    def cal_select_loss(self, select_logits, select_cands, select_actions, node_ids):
+        """
+        calculate select loss
+        Args:
+            select_logits: [batch_size, num_seq, 1] - select logits
+            select_cands: [batch_size, num_candidates] - select candidates, each is a index of select_logits
+            select_actions: [batch_size] - select actions (node id)
+            node_ids: [batch_size * seq] - node ids
+        Returns:
+            select_loss: scalar - select loss
+        """
+
+        select_logits = select_logits.squeeze(-1)
+        mask = node_ids == -1
+        select_logits = select_logits.masked_fill(mask, float('-inf'))
+
+        # 找到select actions 在node_ids中的位置作为target
+        batch_size = select_logits.shape[0]
+        target = torch.zeros(batch_size, dtype=torch.long, device=select_logits.device)
+        
+        for i in range(batch_size):
+            sample_node_ids = node_ids[i]  # [seq_len]
+            sample_action = select_actions[i]  # node id
+            
+            # 找到action在node_ids中的位置
+            action_positions = (sample_node_ids == sample_action).nonzero(as_tuple=True)[0]
+            if len(action_positions) > 0:
+                target[i] = action_positions[0]  # 取第一个匹配的位置
+            else:
+                target[i] = 0  # 默认值，会被mask掉
+                print(f'action node id {sample_action} not found in node_ids {sample_node_ids}')
+
+        loss = F.cross_entropy(select_logits, target, reduction='none')
+        acc = (select_logits.argmax(dim=-1) == target).float().mean().item()
+        return loss.mean(), acc
+    
+
+    def cross_attention(self, query, key, value, query_mask=None, key_mask=None):
+        """
+        Cross attention function with padding masks for both query and key
+        Args:
+            query: [batch_size, seq_len, d_model] - query embeddings
+            key: [batch_size, num_vars, d_model] - key embeddings  
+            value: [batch_size, num_vars, d_model] - value embeddings
+            query_mask: [batch_size, seq_len] - query padding mask
+            key_mask: [batch_size, num_vars] - key padding mask (True=padding)
         Returns:
             attended_output: [batch_size, seq_len, d_model]
             attention_weights: [batch_size, seq_len, num_vars]
         """
-        seq_len, d_model = query.shape
-        num_vars, _ = key.shape
+        batch_size, seq_len, d_model = query.shape
+        _, num_vars, _ = key.shape
         
-        # Calculate attention scores
-        # [batch_size, seq_len, num_vars]
-        attention_scores = torch.matmul(query, key.transpose(-1, 0)) / (d_model ** 0.5)
+        # Calculate attention scores: [batch_size, seq_len, num_vars]
+        attention_scores = torch.matmul(query, key.transpose(-1, -2)) / (d_model ** 0.5)
         
-        # Apply mask if provided
-        if mask is not None:
-            attention_scores = attention_scores.masked_fill(mask == 0, float('-inf'))
+        # Apply padding masks if provided
+        if query_mask is not None or key_mask is not None:
+            # 创建attention mask: [batch_size, seq_len, num_vars]
+            if query_mask is not None:
+                query_mask_expanded = query_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+            else:
+                query_mask_expanded = torch.ones(batch_size, seq_len, 1, dtype=torch.bool, device=query.device)
+            
+            if key_mask is not None:
+                key_mask_expanded = key_mask.unsqueeze(1)  # [batch_size, 1, num_vars]
+            else:
+                key_mask_expanded = torch.ones(batch_size, 1, num_vars, dtype=torch.bool, device=query.device)
+            
+            # 只有当query和key都不是padding时，attention score才有效
+            attention_mask = query_mask_expanded & key_mask_expanded  # [batch_size, seq_len, num_vars]
+            
+            # Apply mask
+            attention_scores = attention_scores.masked_fill(attention_mask, float('-inf'))
         
         # Apply softmax to get attention weights
         attention_weights = F.softmax(attention_scores, dim=-1)
@@ -172,44 +313,7 @@ class DTModel(nn.Module):
         # Apply attention weights to values
         attended_output = torch.matmul(attention_weights, value)
         
-        return attended_output
-
-    def cal_select_loss(self, select_logits, sequence_node_id, select_node_id, candidates, device):
-        """
-        计算选择节点的交叉熵损失
-        Args:
-            select_logits: [N, 1] - 每个位置的logits
-            sequence_node_id: list - 每个位置对应的节点ID
-            select_node_id: int - 目标节点ID
-            candidates: list - 候选位置索引
-            device: torch.device
-        Returns:
-            loss: torch.Tensor - 交叉熵损失，如果无法计算则返回None
-        """
-        # 找到select_node_id在sequence_node_id中的位置
-        target_positions = [i for i, node_id in enumerate(sequence_node_id) if node_id == select_node_id]
-        
-        if not target_positions:
-            print(f"Warning: select_node_id {select_node_id} not found in sequence_node_id")
-            return None
-            
-        if not candidates:
-            print(f"Warning: candidates list is empty")
-            return None
-         
-        # 找到目标在候选中的索引
-        target_candidate_idx = candidates.index(select_node_id)
-        
-        # 提取候选位置的logits
-        candidate_logits = select_logits[candidates].squeeze(-1)  # [num_candidates]
-        
-        # 计算交叉熵损失
-        loss = F.cross_entropy(
-            candidate_logits.unsqueeze(0),  # [1, num_candidates]
-            torch.tensor([target_candidate_idx], device=device)  # [1]
-        )
-        
-        return loss
+        return attended_output, attention_weights
 
     def cal_branch_logits(self, state, sequence):
         x = self.transformer(sequence.unsqueeze(0)).squeeze(0)  # [N, F]

@@ -24,9 +24,11 @@ class Brancher(sp.Branchrule):
 
 class StrongBranchingRule(sp.Branchrule):
 
-    def __init__(self, scip, save_dir):
+    def __init__(self, scip, sequence_saver, save_dir):
         self.scip = scip
         self.save_dir = save_dir
+
+        self.saver = sequence_saver
 
         varrs = self.scip.getVars() # equal to variables nums in bipartite graph representation
         original_conss = self.scip.getConss()
@@ -142,11 +144,20 @@ class StrongBranchingRule(sp.Branchrule):
                 print("error in save branch_cands info")
             cands_indexs.append(_var_idx) 
         info = {
+            "type":'branch',
             "node_number" : node_number,
             "candidate_indices": cands_indexs,
             "scores": scores,
             "selected_var_index": best_cand_idx
         }
+
+        data = {
+            "type" : "branch",
+            "data" : [best_cand_idx],
+            "cand" : cands_indexs
+        }
+
+        self.saver.squence.append(data)
         # print(f'branch on the node {node_number} and  var {branch_cands[best_cand_idx]}')
-        torch.save(info, file_path)
+        # torch.save(info, file_path)
         return {"result": SCIP_RESULT.BRANCHED}

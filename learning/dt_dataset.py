@@ -9,24 +9,155 @@ import random
 
 def simple_collate_fn(batch):
     """
-    简单的collate函数，只pad sequence_data到相同长度
+    简单的collate函数，处理包含branch_sequence和select_sequence的batch
     Args:
-        batch: list of sequence_data from dataset
+        batch: list of (state, select_sequence, branch_sequence, select_cand, branch_cand, node_id) from dataset
     Returns:
-        padded_sequence_data: list of padded sequences
+        batched_data: dictionary containing batched tensors with masks
     """
-    # 找到batch中的最大序列长度
-    max_seq_len = max(len(seq) for seq in batch)
+    # 分离batch中的各个组件
+    states = [item[0] for item in batch]
+    select_sequences = [item[1] for item in batch]
+    branch_sequences = [item[2] for item in batch]
+    select_cands = [item[3] for item in batch]
+    branch_cands = [item[4] for item in batch]
+    node_ids = [item[5] for item in batch]
+    types = [item[6] for item in batch]
+    select_actions = [item[7] for item in batch]
+    branch_actions = [item[8] for item in batch]
     
-    # 对每个序列进行padding
-    padded_batch = []
-    for seq in batch:
+    # 找到batch中的最大序列长度（只遍历一次）
+    max_select_seq_len = max(len(seq) for seq in select_sequences)
+    max_branch_seq_len = max(len(seq) for seq in branch_sequences)
+    max_select_cands = max(len(seq) for seq in select_cands)
+    max_branch_cands = max(len(seq) for seq in branch_cands)
+    max_node_id = max(len(node_id) for node_id in node_ids)
+    max_type = max(len(type) for type in types)
+
+    # 获取序列的维度信息
+    if len(select_sequences) > 0 and len(select_sequences[0]) > 0:
+        select_seq_dim = select_sequences[0].shape[1] if len(select_sequences[0].shape) > 1 else 1
+        branch_seq_dim = branch_sequences[0].shape[1] if len(branch_sequences[0].shape) > 1 else 1
+    else:
+        select_seq_dim = 1
+        branch_seq_dim = 1
+    
+    # 初始化结果列表
+    padded_select_sequences = []
+    padded_branch_sequences = []
+    padded_select_cands = []
+    padded_branch_cands = []
+    padded_node_ids = []
+    padded_types = []
+    select_sequence_masks = []
+    branch_sequence_masks = []
+    select_cand_masks = []
+    branch_cand_masks = []
+    node_id_masks = []
+    
+    # 只遍历一次batch，完成所有padding和mask生成
+    for seq, branch_seq, select_cand, branch_cand, node_id, type in zip(
+        select_sequences, branch_sequences, select_cands, branch_cands, node_ids, types
+    ):
+        # 处理select_sequences
         seq_len = len(seq)
-        # 用None填充到最大长度
-        padded_seq = seq + [None] * (max_seq_len - seq_len)
-        padded_batch.append(padded_seq)
+        if len(seq.shape) > 1:
+            padded_seq = torch.zeros(max_select_seq_len, select_seq_dim, dtype=seq.dtype)
+        else:
+            padded_seq = torch.zeros(max_select_seq_len, dtype=seq.dtype)
+        padded_seq[:seq_len] = seq
+        padded_select_sequences.append(padded_seq)
+        
+        # 生成select_sequence mask
+        mask = torch.ones(max_select_seq_len, dtype=torch.bool)
+        mask[:seq_len] = False
+        select_sequence_masks.append(mask)
+        
+        # 处理branch_sequences
+        branch_seq_len = len(branch_seq)
+        if len(branch_seq.shape) > 1:
+            padded_branch_seq = torch.zeros(max_branch_seq_len, branch_seq_dim, dtype=branch_seq.dtype)
+        else:
+            padded_branch_seq = torch.zeros(max_branch_seq_len, dtype=branch_seq.dtype)
+        padded_branch_seq[:branch_seq_len] = branch_seq
+        padded_branch_sequences.append(padded_branch_seq)
+        
+        # 生成branch_sequence mask
+        branch_mask = torch.ones(max_branch_seq_len, dtype=torch.bool)
+        branch_mask[:branch_seq_len] = False
+        branch_sequence_masks.append(branch_mask)
+        
+        # 处理select_cands
+        select_cand_len = len(select_cand)
+        if len(select_cand.shape) > 1:
+            padded_select_cand = torch.full((max_select_cands, select_cand.shape[1]), -1, dtype=select_cand.dtype)
+        else:
+            padded_select_cand = torch.full((max_select_cands,), -1, dtype=select_cand.dtype)
+        padded_select_cand[:select_cand_len] = select_cand
+        padded_select_cands.append(padded_select_cand)
+        
+        # 生成select_cand mask
+        select_cand_mask = torch.zeros(max_select_cands, dtype=torch.bool)
+        select_cand_mask[:select_cand_len] = True
+        select_cand_masks.append(select_cand_mask)
+        
+        # 处理branch_cands
+        branch_cand_len = len(branch_cand)
+        if len(branch_cand.shape) > 1:
+            padded_branch_cand = torch.full((max_branch_cands, branch_cand.shape[1]), -1, dtype=branch_cand.dtype)
+        else:
+            padded_branch_cand = torch.full((max_branch_cands,), -1, dtype=branch_cand.dtype)
+        padded_branch_cand[:branch_cand_len] = branch_cand
+        padded_branch_cands.append(padded_branch_cand)
+        
+        # 生成branch_cand mask
+        branch_cand_mask = torch.zeros(max_branch_cands, dtype=torch.bool)
+        branch_cand_mask[:branch_cand_len] = True
+        branch_cand_masks.append(branch_cand_mask)
+        
+        # 处理node_ids
+        node_id_len = len(node_id)
+        if len(node_id.shape) > 1:
+            padded_node_id = torch.full((max_node_id, node_id.shape[1]), -1, dtype=node_id.dtype)
+        else:
+            padded_node_id = torch.full((max_node_id,), -1, dtype=node_id.dtype)
+        padded_node_id[:node_id_len] = node_id
+        padded_node_ids.append(padded_node_id)
+        
+        # 生成node_id mask
+        node_id_mask = torch.zeros(max_node_id, dtype=torch.bool)
+        node_id_mask[:node_id_len] = True
+        node_id_masks.append(node_id_mask)
+
+        # 处理type
+        type_len = len(type)
+        if len(type.shape) > 1:
+            padded_type = torch.full((max_type, type.shape[1]), 0, dtype=type.dtype)
+        else:
+            padded_type = torch.full((max_type,), 0, dtype=type.dtype)
+        padded_type[:type_len] = type
+        padded_types.append(padded_type)
+
     
-    return padded_batch
+    # 堆叠所有tensor
+    batched_data = {
+        'select_sequences': torch.stack(padded_select_sequences),
+        'branch_sequences': torch.stack(padded_branch_sequences),
+        'select_cands': torch.stack(padded_select_cands),
+        'branch_cands': torch.stack(padded_branch_cands),
+        'node_ids': torch.stack(padded_node_ids),
+        'types' : torch.stack(padded_types),
+        'select_actions': torch.stack(select_actions).to(torch.int64),
+        'branch_actions': torch.stack(branch_actions).to(torch.int64),
+        'select_sequence_masks': torch.stack(select_sequence_masks),
+        'branch_sequence_masks': torch.stack(branch_sequence_masks),
+        'select_cand_masks': torch.stack(select_cand_masks),
+        'branch_cand_masks': torch.stack(branch_cand_masks),
+        'node_id_masks': torch.stack(node_id_masks),
+    
+    }
+    
+    return states, batched_data
 
 class BnBSequentialDataset(Dataset):
     def __init__(self, data_dir, max_samples=None):
@@ -38,6 +169,8 @@ class BnBSequentialDataset(Dataset):
         # Each folder is a trajectory (e.g., a MILP instance run)
         all_dirs = [d for d in Path(self.data_dir).iterdir() if d.is_dir()]
         
+        print(f"Total directories: {len(all_dirs)}")
+        return all_dirs
         # 统计每个文件夹的文件数量
         dir_file_counts = []
         for d in all_dirs:
@@ -67,132 +200,27 @@ class BnBSequentialDataset(Dataset):
 
     def __getitem__(self, idx):
         dir_path = self.trajectories[idx]
-        pt_files = sorted(list(Path(dir_path).glob("*.pt")),
-                        key=lambda p: float(p.name.split("_")[0]))
 
-        # 存储原始数据而不是嵌入向量
-        sequence_data = []  # 存储原始数据和类型信息
-        type_ids = []
-        actions = []  
-        candidates = []
-        branch_scores = []
-        reward_accum = 0.0
-        state_embedded = False
+        state = torch.load(dir_path / 'state.pt')
+        sequence_data = torch.load(dir_path / 'data.pt')
+        type = torch.load(dir_path / 'type.pt')
+        cand = torch.load(dir_path / 'cand.pt')
+        node_id = torch.load(dir_path / 'node_id.pt')
 
-        # 第一遍遍历计算总奖励
-        for pt in pt_files:
-            name = pt.name
-            if name.endswith("origin_milp.pt") and not state_embedded:
-                state_embedded = True
-            elif "selected" in name and state_embedded:
-                reward_accum += -1
-            elif "branch_on" in name and state_embedded:
-                reward_accum += -1
-            elif "bestsolfound" in name and state_embedded:
-                reward_accum += 100
-            elif "nodeinfeasible" in name and state_embedded:
-                reward_accum += 10
+        # 找到type=1和type=0的位置
+        type_1_indices = torch.where(type == 1)[0][1:]  # select positions, not choose first selct
+        type_2_indices = torch.where(type == 2)[0]  # branch positions
 
-        # 重置状态
-        state_embedded = False
-        state_length = 0
-        
-        for pt in pt_files:
-            name = pt.name
+        select_idx = random.choice(type_1_indices.tolist())
+        select_sequence = sequence_data[:select_idx]
+         
+        branch_idx = random.choice(type_2_indices.tolist())
+        branch_sequence = sequence_data[:branch_idx]
 
-            if name.endswith("origin_milp.pt") and not state_embedded:
-                # 存储原始GNN输入数据
-                gnn_input = torch.load(pt)
-                sequence_data.append({
-                    'type': 'state',
-                    'data': gnn_input,
-                    'reward': reward_accum
-                })
-                
-                state_embedded = True
+        select_action = sequence_data[select_idx][0]
+        branch_action = sequence_data[branch_idx][0]
 
-                #default select node 1
-                # sequence_data.append({
-                #     'type': 'select',
-                #     'data': 1,
-                #     'candidates' : []
-                # })
-
-                # 添加奖励token
-                sequence_data.append({
-                    'type': 'reward',
-                    'data': reward_accum
-                })
-
-
-
-            elif "select" in name and state_embedded:
-                node_idx = int(re.findall(r'select_(\d+)', name)[0])
-                
-                cand_nodes = torch.load(pt),
-
-                # 存储节点索引数据
-                sequence_data.append({
-                    'type': 'select',
-                    'data': node_idx,
-                    'candidate' : cand_nodes
-                })
-
-                reward_accum += 1
-                # 添加奖励token
-                sequence_data.append({
-                    'type': 'reward',
-                    'data': reward_accum
-                })
-
-            elif "bestsolfound" in name and state_embedded:
-                if sequence_data[-1]['type'] != 'reward':
-                    print("error in reward")
-                reward_accum -= 100
-                # 更新最后的奖励数据
-                sequence_data[-1]['data'] = reward_accum
-                
-            elif "nodeinfeasible" in name and state_embedded:
-                if sequence_data[-1]['type'] != 'reward':
-                    print("error in reward")
-                reward_accum -= 10
-                # 更新最后的奖励数据
-                sequence_data[-1]['data'] = reward_accum
-
-            elif "branch" in name and state_embedded:
-                info = torch.load(pt)
-                #node_number = info["node_number"]
-                branch_var_idx = info["selected_var_index"]
-                cand_var_idx = info["candidate_indices"]
-                scores = info["scores"]
-                if len(cand_var_idx) != len(scores):
-                    print("error in branch scores")
-
-                # 存储分支变量数据
-                sequence_data.append({
-                    'type': 'branch',
-                    #'node_number':node_number,
-                    'data': branch_var_idx,
-                    'candidate': cand_var_idx,
-                    'score': scores
-                })
-                reward_accum += 1
-
-            elif "parent" in name and state_embedded:
-                match = re.search(r'parent_\d+_to_(\d+)\.pt', name)
-                node_idx = int(match.group(1))
-                #parent_node_idx = int(match.group(0))  
-                child_node = torch.load(pt)
-                # 存储子节点数据
-                sequence_data.append({
-                    'type': 'node',
-                    'data': child_node,
-                    'node_id': node_idx,
-                    #'parent_node_number': parent_node_idx
-                })
-
-
-        return sequence_data
+        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action
     
 
 def calculate_average_reward_static(dataset):
