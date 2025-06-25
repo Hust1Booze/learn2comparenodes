@@ -43,6 +43,12 @@ def train():
     # 创建检查点目录
     os.makedirs("./checkpoints", exist_ok=True)
     
+    # 创建模型保存目录
+    os.makedirs("./models", exist_ok=True)
+    
+    # 跟踪最佳验证branch_top1准确率
+    best_branch_top1 = 0.0
+    
     # 创建TensorBoard writer
     current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
     log_dir = f'./logs/train_{current_time}'
@@ -122,7 +128,7 @@ def train():
         writer.add_scalar('Train_Time/Duration', duration, epoch)
 
         # eval
-        if epoch % 10 ==0:
+        if epoch % 100 ==0:
             model.eval()
             valid_select_loss = 0
             valid_branch_loss = 0
@@ -133,20 +139,21 @@ def train():
             valid_branch_top1 = []
             valid_branch_top5 = []
             valid_branch_top10 = []
-            for batch in valid_dataloader:
-                # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
-                states, sequence_data = batch
-                # 前向传播
-                branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model(states, sequence_data, device)
-                valid_select_loss += select_loss.item()
-                valid_branch_loss += branch_loss.item()
-                valid_select_top1.append(select_top1)
-                valid_select_top5.append(select_top5)
-                valid_select_top10.append(select_top10)
-                valid_branch_top1.append(branch_top1)
-                valid_branch_top5.append(branch_top5)
-                valid_branch_top10.append(branch_top10)
-                valid_step += 1
+            for i in range(10):
+                for batch in valid_dataloader:
+                    # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
+                    states, sequence_data = batch
+                    # 前向传播
+                    branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model(states, sequence_data, device)
+                    valid_select_loss += select_loss.item()
+                    valid_branch_loss += branch_loss.item()
+                    valid_select_top1.append(select_top1)
+                    valid_select_top5.append(select_top5)
+                    valid_select_top10.append(select_top10)
+                    valid_branch_top1.append(branch_top1)
+                    valid_branch_top5.append(branch_top5)
+                    valid_branch_top10.append(branch_top10)
+                    valid_step += 1
             # 计算平均指标
             avg_valid_select_loss = valid_select_loss / valid_step
             avg_valid_branch_loss = valid_branch_loss / valid_step
@@ -169,6 +176,14 @@ def train():
             writer.add_scalar('Valid_Accuracy/Branch_Top1', avg_valid_branch_top1, epoch)
             writer.add_scalar('Valid_Accuracy/Branch_Top5', avg_valid_branch_top5, epoch)
             writer.add_scalar('Valid_Accuracy/Branch_Top10', avg_valid_branch_top10, epoch)
+
+            # 检查是否达到新的最佳验证branch_top1准确率
+            if avg_valid_branch_top1 > best_branch_top1:
+                best_branch_top1 = avg_valid_branch_top1
+                # 保存模型
+                model_path = f'./models/best_model_{datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.pth'
+                torch.save(model.state_dict(), model_path)
+                print(f"新的最佳验证branch_top1准确率: {best_branch_top1:.4f}，模型已保存到: {model_path}")
 
     print("Training completed!")
     
