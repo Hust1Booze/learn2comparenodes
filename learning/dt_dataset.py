@@ -170,30 +170,14 @@ class BnBSequentialDataset(Dataset):
         all_dirs = [d for d in Path(self.data_dir).iterdir() if d.is_dir()]
         
         print(f"Total directories: {len(all_dirs)}")
-        return all_dirs
-        # 统计每个文件夹的文件数量
-        dir_file_counts = []
-        for d in all_dirs:
-            file_count = len(list(d.glob("*.pt")))  # 只计算 .pt 文件
-            dir_file_counts.append((d, file_count))
-        
-        # 按文件数量排序
-        dir_file_counts.sort(key=lambda x: x[1])
-        
-        # 计算要保留的文件夹数量（去掉最大的10%）
-        num_to_keep = int(len(dir_file_counts) * 0.8)
-        filtered_dirs = [d for d, _ in dir_file_counts[:num_to_keep]]
-        
-        print(f"Total directories: {len(all_dirs)}")
-        print(f"Directories after removing top 20%: {len(filtered_dirs)}")
-        print(f"File count range in kept directories: {dir_file_counts[0][1]} - {dir_file_counts[num_to_keep-1][1]}")
-        
+
         if self.max_samples is not None:
             # 随机选择指定数量的样本
-            random.shuffle(filtered_dirs)
-            filtered_dirs = filtered_dirs[:self.max_samples]
+            random.shuffle(all_dirs)
+            all_dirs = all_dirs[:self.max_samples]
         
-        return filtered_dirs
+        return all_dirs
+    
 
     def __len__(self):
         return len(self.trajectories)

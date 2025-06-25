@@ -108,7 +108,7 @@ if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
     problem = 'GISP'
-    data_partitions = ['valid'] #dont change
+    data_partitions = ['train','valid'] #dont change
     n_cpu = 8
     n_instance = -1
     device = 'cpu'

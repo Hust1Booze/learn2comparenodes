@@ -14,15 +14,16 @@ import numpy as np
                           
 def train():
 
-    batch_size = 8
+    batch_size = 32
     
     # 解析命令行参数（DeepSpeed需要）
     ds_config = {
         "train_micro_batch_size_per_gpu": batch_size,
+         #"gradient_accumulation_steps": 4,
         "optimizer": {
             "type": "Adam",
             "params": {
-                "lr": 1e-4
+                "lr": 5e-4
             }
         },
         "fp16": {
@@ -37,13 +38,13 @@ def train():
     }
 
     model = DTModel()
-    print(model)
 
-    model.print_model_info()
+
+    #model.print_model_info()
     
     # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/transformer_foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
-    valid_dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/transformer_foundation/learn2comparenodes/node_selection/data/GISP", max_samples=1000)
+    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/GISP/train/", max_samples=500)
+    valid_dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/GISP/valid", max_samples=100)
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
@@ -54,6 +55,7 @@ def train():
     # 只在主进程创建TensorBoard writer
     writer = None
     if model_engine.global_rank == 0:
+
         # 创建TensorBoard writer
         current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
         log_dir = f'./logs/train_{current_time}'
@@ -65,9 +67,9 @@ def train():
         print(f"TensorBoard日志将保存到: {log_dir}")
     
     # 计算平均奖励（使用静态方法，不需要模型前向传播）
-    if model_engine.global_rank == 0:  # 只在主进程打印
-        avg_reward = calculate_average_reward_static(dataset)
-        print(f"Average reward: {avg_reward}")
+    # if model_engine.global_rank == 0:  # 只在主进程打印
+    #     avg_reward = calculate_average_reward_static(dataset)
+    #     print(f"Average reward: {avg_reward}")
     
     # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
@@ -114,10 +116,7 @@ def train():
 
         # 只在主进程打印
         if model_engine.global_rank == 0:
-            print(f"Epoch {epoch}:")
-            print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
-            print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
-            print(f"  Time: {duration:.2f} seconds", flush= True)
+            print(f"Epoch {epoch}: Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}, Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}, Time: {duration:.2f} seconds", flush=True)
             
             # 记录epoch级别的指标到TensorBoard（只在主进程）
             if writer is not None:
@@ -153,9 +152,7 @@ def train():
             avg_valid_branch_acc = np.mean(valid_branch_acc)
             # 只在主进程打印
             if model_engine.global_rank == 0:
-                print(f"Epoch valid {epoch}:")
-                print(f"  Select Loss: {avg_valid_select_loss:.4f}, Branch Loss: {avg_valid_branch_loss:.4f}")
-                print(f"  Select Acc: {avg_valid_select_acc:.4f}, Branch Acc: {avg_valid_branch_acc:.4f}")
+                print(f"Valid {epoch}: Select Loss: {avg_valid_select_loss:.4f}, Branch Loss: {avg_valid_branch_loss:.4f}, Select Acc: {avg_valid_select_acc:.4f}, Branch Acc: {avg_valid_branch_acc:.4f}")
                 
                 # 记录epoch级别的指标到TensorBoard（只在主进程）
                 if writer is not None:

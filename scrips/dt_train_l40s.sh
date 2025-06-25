@@ -25,4 +25,4 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 export NVCC_APPEND_FLAGS="-allow-unsupported-compiler"
 
 # 使用DeepSpeed启动多GPU训练，明确指定GPU设备
-deepspeed learning/dt_train.py 
+deepspeed learning/dt_train_ds.py 

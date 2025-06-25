@@ -14,9 +14,10 @@ root_dir=$(pwd)
 echo "root_dir:"${root_dir}
 
 
-# python problem_generation/gisp.py |tee logs/gen_problem.txt
+python problem_generation/gisp.py -data_partition train -n_instance 1000 -n_cpu 20
+python problem_generation/gisp.py -data_partition valid -n_instance 100 -n_cpu 20
 
-python node_selection/behaviour_gen.py |tee logs/gen_new_data.txt
+python node_selection/behaviour_gen.py -n_cpu 20
 
 # python node_selection/behaviour_gen.py |tee logs/gen_new_data_2.txt
 
