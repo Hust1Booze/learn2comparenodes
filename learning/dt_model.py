@@ -84,12 +84,11 @@ class DTModel(nn.Module):
         select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
         branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
 
-        # cal  loss
-        select_loss, select_acc = self.cal_select_loss(select_logits, select_cands, select_actions, node_ids)
-        branch_loss, branch_acc = self.cal_branch_loss(branch_logits, branch_cands, branch_actions)
+        # cal branch loss
+        branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_actions)
+        select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_actions, node_ids)
 
-
-        return select_loss, branch_loss, select_acc, branch_acc, 
+        return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
     
 
     def deal_states(self, states, device):
@@ -229,8 +228,20 @@ class DTModel(nn.Module):
         target = branch_cands[batch_indices,branch_actions]      
         # 计算交叉熵损失
         loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
-        acc = (masked_logits.argmax(dim=-1) == target).float().mean().item()
-        return loss.mean(), acc
+        
+        # 计算top1, top5, top10准确率
+        _, top_indices = masked_logits.topk(k=10, dim=-1)  # [batch_size, 10]
+        
+        # 检查top1是否包含标签
+        top1_correct = (top_indices[:, 0] == target).float().mean().item()
+        
+        # 检查top5是否包含标签
+        top5_correct = torch.any(top_indices[:, :5] == target.unsqueeze(1), dim=1).float().mean().item()
+        
+        # 检查top10是否包含标签
+        top10_correct = torch.any(top_indices == target.unsqueeze(1), dim=1).float().mean().item()
+        
+        return loss.mean(), top1_correct, top5_correct, top10_correct
 
     def cal_select_loss(self, select_logits, select_cands, select_actions, node_ids):
         """
@@ -265,8 +276,20 @@ class DTModel(nn.Module):
                 print(f'action node id {sample_action} not found in node_ids {sample_node_ids}')
 
         loss = F.cross_entropy(select_logits, target, reduction='none')
-        acc = (select_logits.argmax(dim=-1) == target).float().mean().item()
-        return loss.mean(), acc
+        
+        # 计算top1, top5, top10准确率
+        _, top_indices = select_logits.topk(k=10, dim=-1)  # [batch_size, 10]
+        
+        # 检查top1是否包含标签
+        top1_correct = (top_indices[:, 0] == target).float().mean().item()
+        
+        # 检查top5是否包含标签
+        top5_correct = torch.any(top_indices[:, :5] == target.unsqueeze(1), dim=1).float().mean().item()
+        
+        # 检查top10是否包含标签
+        top10_correct = torch.any(top_indices == target.unsqueeze(1), dim=1).float().mean().item()
+        
+        return loss.mean(), top1_correct, top5_correct, top10_correct
     
 
     def cross_attention(self, query, key, value, query_mask=None, key_mask=None):
