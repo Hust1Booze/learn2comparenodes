@@ -277,17 +277,15 @@ class DTModel(nn.Module):
 
         loss = F.cross_entropy(select_logits, target, reduction='none')
         
-        # 计算top1, top5, top10准确率
-        _, top_indices = select_logits.topk(k=10, dim=-1)  # [batch_size, 10]
+        # 只计算top1准确率
+        _, top_indices = select_logits.topk(k=1, dim=-1)  # [batch_size, 1]
         
         # 检查top1是否包含标签
         top1_correct = (top_indices[:, 0] == target).float().mean().item()
         
-        # 检查top5是否包含标签
-        top5_correct = torch.any(top_indices[:, :5] == target.unsqueeze(1), dim=1).float().mean().item()
-        
-        # 检查top10是否包含标签
-        top10_correct = torch.any(top_indices == target.unsqueeze(1), dim=1).float().mean().item()
+        # select任务只关注top1，top5和top10设为0
+        top5_correct = 0.0
+        top10_correct = 0.0
         
         return loss.mean(), top1_correct, top5_correct, top10_correct
     
