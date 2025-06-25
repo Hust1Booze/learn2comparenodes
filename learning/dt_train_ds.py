@@ -54,17 +54,22 @@ def train():
     
     # 只在主进程创建TensorBoard writer
     writer = None
+    best_branch_top1 = 0.0  # 用于跟踪最佳branch_top1
+    
     if model_engine.global_rank == 0:
 
         # 创建TensorBoard writer
         current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
         log_dir = f'./logs/train_{current_time}'
+        save_dir = f'./checkpoints/train_{current_time}'
         
-        # 确保日志目录存在
+        # 确保日志和保存目录存在
         os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
         
         writer = SummaryWriter(log_dir)
         print(f"TensorBoard日志将保存到: {log_dir}")
+        print(f"模型检查点将保存到: {save_dir}")
     
     # 计算平均奖励（使用静态方法，不需要模型前向传播）
     # if model_engine.global_rank == 0:  # 只在主进程打印
@@ -145,7 +150,7 @@ def train():
                 writer.add_scalar('Epoch_Time/Duration', duration, epoch)
                 
 
-        if epoch % 10 ==0 :
+        if epoch % 100 ==0 :
             model_engine.eval()
             valid_select_loss = 0
             valid_branch_loss = 0
@@ -156,20 +161,21 @@ def train():
             valid_branch_top1 = []
             valid_branch_top5 = []
             valid_branch_top10 = []
-            for batch in valid_dataloader:
-                states, sequence_data = batch
-                # 前向传播
-                branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model_engine(states, sequence_data, model_engine.device)
+            for i in range(10):
+                for batch in valid_dataloader:
+                    states, sequence_data = batch
+                    # 前向传播
+                    branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model_engine(states, sequence_data, model_engine.device)
 
-                valid_select_loss += select_loss.item()
-                valid_branch_loss += branch_loss.item()
-                valid_select_top1.append(select_top1)
-                valid_select_top5.append(select_top5)
-                valid_select_top10.append(select_top10)
-                valid_branch_top1.append(branch_top1)
-                valid_branch_top5.append(branch_top5)
-                valid_branch_top10.append(branch_top10)
-                valid_step += 1
+                    valid_select_loss += select_loss.item()
+                    valid_branch_loss += branch_loss.item()
+                    valid_select_top1.append(select_top1)
+                    valid_select_top5.append(select_top5)
+                    valid_select_top10.append(select_top10)
+                    valid_branch_top1.append(branch_top1)
+                    valid_branch_top5.append(branch_top5)
+                    valid_branch_top10.append(branch_top10)
+                    valid_step += 1
             avg_valid_select_loss = valid_select_loss / valid_step
             avg_valid_branch_loss= valid_branch_loss / valid_step
             avg_valid_select_top1 = np.mean(valid_select_top1)
@@ -194,7 +200,12 @@ def train():
                     writer.add_scalar('Valid_Accuracy/Branch_Top5', avg_valid_branch_top5, epoch)
                     writer.add_scalar('Valid_Accuracy/Branch_Top10', avg_valid_branch_top10, epoch)
 
-
+            # 检查是否需要保存模型
+            if avg_valid_branch_top1 > best_branch_top1:
+                best_branch_top1 = avg_valid_branch_top1
+                # 保存模型
+                model_engine.save_checkpoint(save_dir, 'best_model')
+                print(f"保存最佳模型 (epoch {epoch}, branch_top1: {avg_valid_branch_top1:.4f}) 到: {os.path.join(save_dir, 'best_model')}")
 
     # 关闭TensorBoard writer（只在主进程）
     if model_engine.global_rank == 0 and writer is not None:
