@@ -8,6 +8,8 @@ import time
 import gc
 import os
 import numpy as np
+from torch.utils.tensorboard import SummaryWriter
+import datetime
 
 def train():
     # 检查CUDA是否可用
@@ -32,7 +34,7 @@ def train():
     valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=True,collate_fn=simple_collate_fn)
     
     # 创建优化器
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
     
 
     select_loss_weight = 0.1
@@ -40,6 +42,16 @@ def train():
     
     # 创建检查点目录
     os.makedirs("./checkpoints", exist_ok=True)
+    
+    # 创建TensorBoard writer
+    current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
+    log_dir = f'./logs/train_{current_time}'
+    
+    # 确保日志目录存在
+    os.makedirs(log_dir, exist_ok=True)
+    
+    writer = SummaryWriter(log_dir)
+    print(f"TensorBoard日志将保存到: {log_dir}")
     
     for epoch in range(100000):
         model.train()
@@ -82,10 +94,16 @@ def train():
         duration = end_time - start_time
 
         # 打印训练信息
-        print(f"Epoch {epoch}:")
-        print(f"  Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}")
-        print(f"  Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}")
-        print(f"  Time: {duration:.2f} seconds", flush=True)
+        print(f"Epoch {epoch}: Select Loss: {avg_select_loss:.4f}, Branch Loss: {avg_branch_loss:.4f}, Select Acc: {avg_select_acc:.4f}, Branch Acc: {avg_branch_acc:.4f}, Time: {duration:.2f}s", flush=True)
+
+        # 记录训练指标到TensorBoard
+        writer.add_scalar('Train_Loss/Select', avg_select_loss, epoch)
+        writer.add_scalar('Train_Loss/Branch', avg_branch_loss, epoch)
+        writer.add_scalar('Train_Loss/Total', avg_select_loss + avg_branch_loss, epoch)
+        writer.add_scalar('Train_Accuracy/Select', avg_select_acc, epoch)
+        writer.add_scalar('Train_Accuracy/Branch', avg_branch_acc, epoch)
+        writer.add_scalar('Train_Count/Total_Steps', total_step, epoch)
+        writer.add_scalar('Train_Time/Duration', duration, epoch)
 
         # eval
         if epoch % 10 ==0:
@@ -111,12 +129,20 @@ def train():
             avg_valid_select_acc = np.mean(valid_select_acc)
             avg_valid_branch_acc = np.mean(valid_branch_acc)
 
-            print(f"Epoch eval{epoch}:")
-            print(f"  Select Loss: {avg_valid_select_loss:.4f}, Branch Loss: {avg_valid_branch_loss:.4f}")
-            print(f"  Select Acc: {avg_valid_select_acc:.4f}, Branch Acc: {avg_valid_branch_acc:.4f}")
+            print(f"Epoch eval {epoch}: Select Loss: {avg_valid_select_loss:.4f}, Branch Loss: {avg_valid_branch_loss:.4f}, Select Acc: {avg_valid_select_acc:.4f}, Branch Acc: {avg_valid_branch_acc:.4f}")
 
+            # 记录验证指标到TensorBoard
+            writer.add_scalar('Valid_Loss/Select', avg_valid_select_loss, epoch)
+            writer.add_scalar('Valid_Loss/Branch', avg_valid_branch_loss, epoch)
+            writer.add_scalar('Valid_Loss/Total', avg_valid_select_loss + avg_valid_branch_loss, epoch)
+            writer.add_scalar('Valid_Accuracy/Select', avg_valid_select_acc, epoch)
+            writer.add_scalar('Valid_Accuracy/Branch', avg_valid_branch_acc, epoch)
 
     print("Training completed!")
+    
+    # 关闭TensorBoard writer
+    writer.close()
+    print(f"TensorBoard日志已保存到: {log_dir}")
 
 if __name__ == "__main__":
     train() 
