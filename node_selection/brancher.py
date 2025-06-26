@@ -111,17 +111,20 @@ class StrongBranchingRule(sp.Branchrule):
         if lperror:
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
-        # 10%的概率随机选择分支变量，90%的概率选择得分最高的变量
-        # if random.random() < 0.1:
-        #     # 随机选择
-        #     best_cand_idx = random.randint(0, npriocands - 1)
-        # else:
-        #     # 选择得分最高的变量（保持原逻辑）
-        #     pass  # best_cand_idx 已经在上面的循环中确定
-
-        # Branch on the variable with the largest score
-        down_child, eq_child, up_child = self.model.branchVarVal(
-            branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
+        action = None
+        #10%的概率随机选择分支变量，90%的概率选择得分最高的变量
+        if random.random() < 0.1:
+            # 随机选择
+            random_cand_idx = random.randint(0, npriocands - 1)
+            action = random_cand_idx
+                    # Branch on the variable with the largest score
+            down_child, eq_child, up_child = self.model.branchVarVal(
+                branch_cands[random_cand_idx], branch_cands[random_cand_idx].getLPSol())
+        else:
+            action =  best_cand_idx
+            # Branch on the variable with the largest score
+            down_child, eq_child, up_child = self.model.branchVarVal(
+                branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
 
         # Update the bounds of the down node and up node. Some cols might not exist due to pricing
         if self.scip.allColsInLP():
@@ -153,7 +156,8 @@ class StrongBranchingRule(sp.Branchrule):
 
         data = {
             "type" : "branch",
-            "data" : [best_cand_idx],
+            "data" : [action],
+            "branch_label" : best_cand_idx,
             "cand" : cands_indexs
         }
 

@@ -11,7 +11,7 @@ def simple_collate_fn(batch):
     """
     简单的collate函数，处理包含branch_sequence和select_sequence的batch
     Args:
-        batch: list of (state, select_sequence, branch_sequence, select_cand, branch_cand, node_id) from dataset
+        batch: list of (state, select_sequence, branch_sequence, select_cand, branch_cand, label) from dataset
     Returns:
         batched_data: dictionary containing batched tensors with masks
     """
@@ -21,17 +21,17 @@ def simple_collate_fn(batch):
     branch_sequences = [item[2] for item in batch]
     select_cands = [item[3] for item in batch]
     branch_cands = [item[4] for item in batch]
-    node_ids = [item[5] for item in batch]
+    labels = [item[5] for item in batch]
     types = [item[6] for item in batch]
-    select_actions = [item[7] for item in batch]
-    branch_actions = [item[8] for item in batch]
+    select_labels = [item[7] for item in batch]
+    branch_labels = [item[8] for item in batch]
     
     # 找到batch中的最大序列长度（只遍历一次）
     max_select_seq_len = max(len(seq) for seq in select_sequences)
     max_branch_seq_len = max(len(seq) for seq in branch_sequences)
     max_select_cands = max(len(seq) for seq in select_cands)
     max_branch_cands = max(len(seq) for seq in branch_cands)
-    max_node_id = max(len(node_id) for node_id in node_ids)
+    max_label = max(len(label) for label in labels)
     max_type = max(len(type) for type in types)
 
     # 获取序列的维度信息
@@ -47,17 +47,17 @@ def simple_collate_fn(batch):
     padded_branch_sequences = []
     padded_select_cands = []
     padded_branch_cands = []
-    padded_node_ids = []
+    padded_labels = []
     padded_types = []
     select_sequence_masks = []
     branch_sequence_masks = []
     select_cand_masks = []
     branch_cand_masks = []
-    node_id_masks = []
+    label_masks = []
     
     # 只遍历一次batch，完成所有padding和mask生成
-    for seq, branch_seq, select_cand, branch_cand, node_id, type in zip(
-        select_sequences, branch_sequences, select_cands, branch_cands, node_ids, types
+    for seq, branch_seq, select_cand, branch_cand, label, type in zip(
+        select_sequences, branch_sequences, select_cands, branch_cands, labels, types
     ):
         # 处理select_sequences
         seq_len = len(seq)
@@ -115,19 +115,19 @@ def simple_collate_fn(batch):
         branch_cand_mask[:branch_cand_len] = True
         branch_cand_masks.append(branch_cand_mask)
         
-        # 处理node_ids
-        node_id_len = len(node_id)
-        if len(node_id.shape) > 1:
-            padded_node_id = torch.full((max_node_id, node_id.shape[1]), -1, dtype=node_id.dtype)
+        # 处理labels
+        label_len = len(label)
+        if len(label.shape) > 1:
+            padded_label = torch.full((max_label, label.shape[1]), -1, dtype=label.dtype)
         else:
-            padded_node_id = torch.full((max_node_id,), -1, dtype=node_id.dtype)
-        padded_node_id[:node_id_len] = node_id
-        padded_node_ids.append(padded_node_id)
+            padded_label = torch.full((max_label,), -1, dtype=label.dtype)
+        padded_label[:label_len] = label
+        padded_labels.append(padded_label)
         
-        # 生成node_id mask
-        node_id_mask = torch.zeros(max_node_id, dtype=torch.bool)
-        node_id_mask[:node_id_len] = True
-        node_id_masks.append(node_id_mask)
+        # 生成label mask
+        label_mask = torch.zeros(max_label, dtype=torch.bool)
+        label_mask[:label_len] = True
+        label_masks.append(label_mask)
 
         # 处理type
         type_len = len(type)
@@ -145,15 +145,15 @@ def simple_collate_fn(batch):
         'branch_sequences': torch.stack(padded_branch_sequences),
         'select_cands': torch.stack(padded_select_cands),
         'branch_cands': torch.stack(padded_branch_cands),
-        'node_ids': torch.stack(padded_node_ids),
+        'labels': torch.stack(padded_labels),
         'types' : torch.stack(padded_types),
-        'select_actions': torch.stack(select_actions).to(torch.int64),
-        'branch_actions': torch.stack(branch_actions).to(torch.int64),
+        'select_labels': torch.stack(select_labels).to(torch.int64),
+        'branch_labels': torch.stack(branch_labels).to(torch.int64),
         'select_sequence_masks': torch.stack(select_sequence_masks),
         'branch_sequence_masks': torch.stack(branch_sequence_masks),
         'select_cand_masks': torch.stack(select_cand_masks),
         'branch_cand_masks': torch.stack(branch_cand_masks),
-        'node_id_masks': torch.stack(node_id_masks),
+        'label_masks': torch.stack(label_masks),
     
     }
     
@@ -189,7 +189,8 @@ class BnBSequentialDataset(Dataset):
         sequence_data = torch.load(dir_path / 'data.pt')
         type = torch.load(dir_path / 'type.pt')
         cand = torch.load(dir_path / 'cand.pt')
-        node_id = torch.load(dir_path / 'node_id.pt')
+        label = torch.load(dir_path / 'label.pt')
+        branch_label = torch.load(dir_path / 'branch_label.pt')
 
         # 找到type=1和type=0的位置
         type_1_indices = torch.where(type == 1)[0][1:]  # select positions, not choose first selct
@@ -202,9 +203,9 @@ class BnBSequentialDataset(Dataset):
         branch_sequence = sequence_data[:branch_idx]
 
         select_action = sequence_data[select_idx][0]
-        branch_action = sequence_data[branch_idx][0]
+        branch_action = branch_label[branch_idx]
 
-        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action
+        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,label[:select_idx], type, select_action, branch_action
     
 
 def calculate_average_reward_static(dataset):

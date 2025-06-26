@@ -20,7 +20,6 @@ class DTModel(nn.Module):
         self.temperature = temperature
         self.use_soft_score_label = use_soft_score_label
 
-        self.node_idx_embedding = nn.Embedding(self.max_nodes, d_model)         # for node_idx
         self.branch_var_embedding = nn.Embedding(self.max_vars, d_model)        # for branch var
         self.reward_embedding = nn.Linear(1, d_model)                           # for reward (scalar → vector)
         self.node_embedding = nn.Linear(8, d_model)  
@@ -64,8 +63,8 @@ class DTModel(nn.Module):
         branch_cands = sequence_data["branch_cands"].to(device)
         node_ids = sequence_data["node_ids"].to(device)
         types = sequence_data["types"].to(device)
-        select_actions = sequence_data["select_actions"]
-        branch_actions = sequence_data["branch_actions"]
+        select_labels = sequence_data["select_labels"]
+        branch_labels = sequence_data["branch_labels"]
 
         select_sequence_masks = sequence_data["select_sequence_masks"].to(device)
         branch_sequence_masks = sequence_data["branch_sequence_masks"].to(device)
@@ -85,8 +84,8 @@ class DTModel(nn.Module):
         branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
 
         # cal branch loss
-        branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_actions)
-        select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_actions, node_ids)
+        branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
+        select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_labels, node_ids)
 
         return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
     
@@ -195,13 +194,13 @@ class DTModel(nn.Module):
         return select_logits 
 
 
-    def cal_branch_loss(self, branch_logits, branch_cands, branch_actions):
+    def cal_branch_loss(self, branch_logits, branch_cands, branch_labels):
         """
         calculate branch loss
         Args:
             branch_logits: [batch_size, num_vars, 1] - branch logits
             branch_cands: [batch_size, num_candidates] - branch candidates, each is a index of branch_logits
-            branch_actions: [batch_size] - branch actions
+            branch_labels: [batch_size] - branch labels
         Returns:
             branch_loss: scalar - branch loss
         """
@@ -224,8 +223,8 @@ class DTModel(nn.Module):
         masked_logits = logits.masked_fill(candidate_mask, float('-inf'))
 
         batch_indices = torch.arange(batch_size, device=branch_logits.device)
-        # actions 就表示label在cands中的位置
-        target = branch_cands[batch_indices,branch_actions]      
+        # labels 就表示label在cands中的位置
+        target = branch_cands[batch_indices,branch_labels]      
         # 计算交叉熵损失
         loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
         
@@ -243,13 +242,13 @@ class DTModel(nn.Module):
         
         return loss.mean(), top1_correct, top5_correct, top10_correct
 
-    def cal_select_loss(self, select_logits, select_cands, select_actions, node_ids):
+    def cal_select_loss(self, select_logits, select_cands, select_labels, node_ids):
         """
         calculate select loss
         Args:
             select_logits: [batch_size, num_seq, 1] - select logits
             select_cands: [batch_size, num_candidates] - select candidates, each is a index of select_logits
-            select_actions: [batch_size] - select actions (node id)
+            select_labels: [batch_size] - select labels (node id)
             node_ids: [batch_size * seq] - node ids
         Returns:
             select_loss: scalar - select loss
@@ -259,21 +258,21 @@ class DTModel(nn.Module):
         mask = node_ids == -1
         select_logits = select_logits.masked_fill(mask, float('-inf'))
 
-        # 找到select actions 在node_ids中的位置作为target
+        # 找到select labels 在node_ids中的位置作为target
         batch_size = select_logits.shape[0]
         target = torch.zeros(batch_size, dtype=torch.long, device=select_logits.device)
         
         for i in range(batch_size):
             sample_node_ids = node_ids[i]  # [seq_len]
-            sample_action = select_actions[i]  # node id
+            label = select_labels[i]  # node id
             
             # 找到action在node_ids中的位置
-            action_positions = (sample_node_ids == sample_action).nonzero(as_tuple=True)[0]
+            action_positions = (sample_node_ids == label).nonzero(as_tuple=True)[0]
             if len(action_positions) > 0:
                 target[i] = action_positions[0]  # 取第一个匹配的位置
             else:
                 target[i] = 0  # 默认值，会被mask掉
-                print(f'action node id {sample_action} not found in node_ids {sample_node_ids}')
+                print(f'label node id {label} not found in node_ids {sample_node_ids}')
 
         loss = F.cross_entropy(select_logits, target, reduction='none')
         
@@ -368,61 +367,41 @@ class DTModel(nn.Module):
 
         return logits
 
-    def get_select_node_decision(self, sequence, type_ids, candidates, actions):
-        device = sequence.device
-        T,D = sequence.shape
-        type_embed = self.type_embedding(type_ids)
-        pos_ids = torch.arange(T, device=device).unsqueeze(0)
-        pos_embed = self.pos_embedding(pos_ids)
+    def get_select_node_decision(self, state_embd, sequence_tensor, types, node_id):
+        sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
+        sequence_embd = self.transformer(sequence_embd.unsqueeze(0))
+        select_logits = self.deal_select(sequence_embd.unsqueeze(0), None, state_embd.unsqueeze(0), None)
 
-        #pos_embed = pos_embed.squeeze(0)
-        x = sequence + type_embed + pos_embed
-
-        encoded = self.transformer(x)
-        candidate_indices = candidates[-1]
-
-        logits = self.select_head(encoded).squeeze(-1)  # [num_cand]
-
-
-        mask = (type_ids == 5)
-        if mask.any():
-            selected_logits = logits.squeeze(0)[mask]  # 取出 type==5 对应的 logits
-            sorted_indices = torch.argsort(selected_logits, descending=True)  # 排序索引（大到小）
-            
-            # 找出原始 logits 中满足 mask 的 indices
-            original_indices = torch.nonzero(mask, as_tuple=False).squeeze(1)
-            
-            # 根据排序后的 logits 索引到对应的 action
-            sorted_actions = actions[original_indices[sorted_indices]]
-            return sorted_actions
-        else:
-            print("why no nodes!")
-            return []
+        return select_logits
         
-    def get_branch_var_decision(self, sequence, type_ids, candidates, actions):
-        device = sequence.device
-        T,D = sequence.shape
-        type_embed = self.type_embedding(type_ids)
-        pos_ids = torch.arange(T, device=device).unsqueeze(0)
-        pos_embed = self.pos_embedding(pos_ids)
+    def get_branch_var_decision(self, state_embd, sequence_tensor, types, node_id):
 
-        #pos_embed = pos_embed.squeeze(0)
-        x = sequence + type_embed + pos_embed
+        with torch.no_grad():  # 用于推理但不训练
+            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
+            sequence_embd = self.transformer(sequence_embd)
+            branch_logits = self.deal_branch(sequence_embd, None, state_embd.unsqueeze(0), None)
 
-        encoded = self.transformer(x)
-        candidate_indices = candidates[-1]
+        return branch_logits
 
-        logits = self.branch_head(encoded).squeeze(-1)  # [num_cand]
+    def get_inference_sequence_embd(self, sequence_tensor, types, node_id):
 
+        ######### step 1 merge input embd ############
+        sequence_embd = self.token_proj(sequence_tensor)
 
-        mask = (type_ids == 1)
-        if mask.any():
-            vars_logits = logits.squeeze(0)[mask]  # 取出 type==5 对应的 logits
-            
-            return vars_logits
-        else:
-            print("why no vars!")
-            return []
+        types_embd = self.type_embedding(types)
+
+        seq_len, _ = sequence_embd.shape
+        
+        # 创建position indices
+        positions = torch.arange(seq_len, device=sequence_embd.device).unsqueeze(0)
+        
+        # 获取position embeddings
+        pos_embd = self.pos_embedding(positions)
+
+        # 组合所有embeddings: token + type + position
+        sequence_embd = sequence_embd + types_embd + pos_embd
+
+        return sequence_embd
 
     def print_model_info(self):
         """
