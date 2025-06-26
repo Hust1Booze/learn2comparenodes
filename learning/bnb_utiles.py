@@ -285,6 +285,8 @@ class BNB_Brancher(sp.Branchrule):
         self.debug = False
         self.default_brancher = False
 
+        self.branch_correct = 0
+
     def branchexeclp(self, allowaddcons):
 
         # candidate_vars, *_ = self.model.getPseudoBranchCands()
@@ -305,20 +307,88 @@ class BNB_Brancher(sp.Branchrule):
             cands_indexs.append(_var_idx) 
         if npriocands == 1:
             best_var = branch_cands[0]
-
         else:
-
             var_logits = self.comb_model.get_branch_var_decision(*self.bnbstates.get_dt_input())
             var_logits = var_logits.squeeze(0)
             candidate_scores = var_logits[cands_indexs]
-            best_var = branch_cands[candidate_scores.argmax()]
+            select_branch_var_idx = candidate_scores.argmax()
+            best_var = branch_cands[select_branch_var_idx]
 
-            # candidate_scores = var_logits[candidate_mask]
-            # best_var = candidate_vars[candidate_scores.argmax()]
-            #best_var = candidate_vars[0]
         if self.debug:
-            print(f'branch on {self.model.getCurrentNode().getNumber()} and {best_var}')
+            # strong branch logic
+            # Initialise scores for each variable
+            scores = [-self.scip.infinity() for _ in range(npriocands)]
+            down_bounds = [None for _ in range(npriocands)]
+            up_bounds = [None for _ in range(npriocands)]
+
+            # Initialise placeholder values
+            num_nodes = self.scip.getNNodes()
+            lpobjval = self.scip.getLPObjVal()
+            lperror = False
+            best_cand_idx = 0
+
+            # Start strong branching and iterate over the branching candidates
+            self.scip.startStrongbranch()
+            for i in range(npriocands):
+
+                # Check the case that the variable has already been strong branched on at this node.
+                # This case occurs when events happen in the node that should be handled immediately.
+                # When processing the node again (because the event did not remove it), there's no need to duplicate work.
+                if self.scip.getVarStrongbranchNode(branch_cands[i]) == num_nodes:
+                    down, up, downvalid, upvalid, _, lastlpobjval = self.scip.getVarStrongbranchLast(branch_cands[i])
+                    if downvalid:
+                        down_bounds[i] = down
+                    if upvalid:
+                        up_bounds[i] = up
+                    downgain = max([down - lastlpobjval, 0])
+                    upgain = max([up - lastlpobjval, 0])
+                    scores[i] = self.scip.getBranchScoreMultiple(branch_cands[i], [downgain, upgain])
+                    continue
+
+                # Strong branch!
+                down, up, downvalid, upvalid, downinf, upinf, downconflict, upconflict, lperror = self.scip.getVarStrongbranch(
+                    branch_cands[i], 200, idempotent=False)
+
+                # In the case of an LP error handle appropriately (for this example we just break the loop)
+                if lperror:
+                    break
+
+                # In the case of both infeasible sub-problems cutoff the node
+                if downinf and upinf:
+                    return {"result": SCIP_RESULT.CUTOFF}
+
+                # Calculate the gains for each up and down node that strong branching explored
+                if not downinf and downvalid:
+                    down_bounds[i] = down
+                    downgain = max([down - lpobjval, 0])
+                else:
+                    downgain = 0
+                if not upinf and upvalid:
+                    up_bounds[i] = up
+                    upgain = max([up - lpobjval, 0])
+                else:
+                    upgain = 0
+
+                # Update the pseudo-costs
+                lpsol = branch_cands[i].getLPSol()
+                if not downinf and downvalid:
+                    self.scip.updateVarPseudocost(branch_cands[i], -self.scip.frac(lpsol), downgain, 1)
+                if not upinf and upvalid:
+                    self.scip.updateVarPseudocost(branch_cands[i], 1 - self.scip.frac(lpsol), upgain, 1)
+
+                scores[i] = self.scip.getBranchScoreMultiple(branch_cands[i], [downgain, upgain])
+                if scores[i] > scores[best_cand_idx]:
+                    best_cand_idx = i
+
+            # End strong branching
+            self.scip.endStrongbranch()
+
+            print(f'branch on {self.model.getCurrentNode().getNumber()} and select {select_branch_var_idx} and strong branch select {best_cand_idx}')
+            self.step += 1
+            if select_branch_var_idx == best_cand_idx:
+                self.branch_correct += 1
             #print(f'branch on {self.model.getCurrentNode().getNumber()} - {best_var} and candidates :{branch_cands}')
+
         self.model.branchVar(best_var)
         result = SCIP_RESULT.BRANCHED
 

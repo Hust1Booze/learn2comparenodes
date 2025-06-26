@@ -96,6 +96,10 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     model.includeEventhdlr(state_trigger, "state_trigger", "Event handler when nodes are pouned")  
     # Run the optimizer
     model.optimize()
+
+    if brancher.debug == True:
+        branch_correct_rate = brancher.branch_correct/ brancher.step
+        print(f"Brancher correct rate : {branch_correct_rate} for " + str(instance).split("/")[-1])
     print(f"Got behaviour for instance with debug_model: {debug_model}  "+ str(instance).split("/")[-1])
     
     with open("nnodes.csv", "a+") as f:
