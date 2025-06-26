@@ -21,9 +21,9 @@ def train():
     model = model.to(device)
     
     # 创建数据集
-    dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/GISP/train", max_samples=1000)
+    dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/train", max_samples=1000)
     
-    valid_dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/GISP/valid", max_samples=1000)
+    valid_dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/valid", max_samples=1000)
     # 计算平均奖励
     # avg_reward = calculate_average_reward_static(dataset)
     # print(f"Average reward: {avg_reward}")

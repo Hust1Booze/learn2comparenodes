@@ -29,3 +29,9 @@ encoder（MILP） -decoder（BNB）结构， 自定义attention 方式来融合M
 对比算法 ： SCIP，
   选变量：Gauss2019，Retro, Yoshua Bengio(AAAI-21)
   选节点：L2C，INFORMS paper ...
+
+  encode MILP 需要的时间
+  BNB squence ATTENTION 热力图（可解释性）
+  算法收敛速度（GAP）
+
+问题 ？

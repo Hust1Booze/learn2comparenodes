@@ -107,7 +107,7 @@ if __name__ == "__main__":
 
     
     oracle = 'optimal_plunger'
-    problem = 'GISP'
+    problem = 'SETCOVER' #'GISP'
     data_partitions = ['train','valid'] #dont change
     n_cpu = 8
     n_instance = 200
@@ -162,7 +162,7 @@ if __name__ == "__main__":
                     device=device,
                     debug_model=debug_model)
       
-        # processes = [  Process(name=f"worker {p}", 
+        # processes = [ Process(name=f"worker {p}", 
         #                                 target=partial(run_episodes,
         #                                                 oracle_type=oracle,
         #                                                 instances=instances[ p1 : p2], 
@@ -181,14 +181,14 @@ if __name__ == "__main__":
         # a = list(map(lambda p: p.start(), processes)) #run processes
         # b = list(map(lambda p: p.join(), processes)) #join processes
         
+                
+        nnodes = np.genfromtxt("nnodes.csv", delimiter=",")[:-1]
+        times = np.genfromtxt("times.csv", delimiter=",")[:-1]
             
-    nnodes = np.genfromtxt("nnodes.csv", delimiter=",")[:-1]
-    times = np.genfromtxt("times.csv", delimiter=",")[:-1]
-        
-    print(f"Mean number of node created  {np.mean(nnodes)}")
-    print(f"Mean solving time  {np.mean(times)}")
-    print(f"Median number of node created  {np.median(nnodes)}")
-    print(f"Median solving time  {np.median(times)}")
+        print(f"Mean number of node created  {np.mean(nnodes)}")
+        print(f"Mean solving time  {np.mean(times)}")
+        print(f"Median number of node created  {np.median(nnodes)}")
+        print(f"Median solving time  {np.median(times)}")
     
     
                          
