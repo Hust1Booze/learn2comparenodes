@@ -110,7 +110,7 @@ if __name__ == "__main__":
     problem = 'GISP'
     data_partitions = ['train','valid'] #dont change
     n_cpu = 8
-    n_instance = -1
+    n_instance = 200
     device = 'cpu'
     debug_model = 0
 
