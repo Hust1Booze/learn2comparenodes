@@ -1,11 +1,10 @@
 #!/bin/bash
 #SBATCH -o job.%j.out
-#SBATCH --partition=l40s
-#SBATCH -J dt_bnb
-#SBATCH -N 1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:1
-#SBATCH --qos=dcgpu
+#SBATCH --partition=cpu
+#SBATCH -J gen_data
+#SBATCH -n 1             
+#SBATCH --cpus-per-task=20   # 每节点核数
+#SBATCH --qos=cpu     
 
 
 # this shell use CPU and just validate one checkpoint

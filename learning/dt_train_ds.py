@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
-from dt_model import DTModel
+from dt_model_decoder import DTModel
 import time
 import deepspeed
 import os
@@ -40,8 +40,8 @@ def train():
     model = DTModel()
     
     # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/GISP/train/", max_samples=200)
-    valid_dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/GISP/valid/", max_samples=100)
+    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/train/", max_samples=1000)
+    valid_dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/valid/", max_samples=100)
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
