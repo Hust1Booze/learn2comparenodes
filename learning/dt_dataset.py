@@ -191,8 +191,8 @@ class BnBSequentialDataset(Dataset):
                 type_data = type_data[2:]
                 
                 # 记录序列长度和对应的目录
-                sequence_lengths.append(len(sequence_data))
                 if sequence_data.shape[1] == 8:#done know why ,SETCOVER的数据有的不是8列
+                    sequence_lengths.append(sequence_data.shape[0])
                     valid_dirs.append(dir_path)
                 
             except Exception as e:
@@ -274,6 +274,9 @@ class BnBSequentialDataset(Dataset):
         node_id = torch.load(dir_path / 'node_id.pt')
         branch_label = torch.load(dir_path / 'branch_label.pt')
 
+        if sequence_data.shape[0]> 2000 :
+            print(f"sequence_data.shape[0]> 2000: {sequence_data.shape[0]}, path: {dir_path}")
+        
         # 暂时这样做，不知道为什么 SETCOVER收集的数据会选择节点1三次,甚至多次
         # sequence_data = _sequence_data[2:]
         # type = _type[2:]
@@ -287,15 +290,16 @@ class BnBSequentialDataset(Dataset):
 
         select_action = 1 
         times = 0
-        while select_action == 1 and times < 10:
+        while select_action == 1 and times < 100:
             select_idx = random.choice(type_1_indices.tolist())
             select_sequence = sequence_data[:select_idx]
             select_action = sequence_data[select_idx][0]
             times += 1
 
-        if times == 10:
+        if times == 100:
             print(f"select_idx not in node_id: {select_idx}, path: {dir_path}")
             return None, None, None, None, None, None, None, None, None
+        
 
         branch_idx = random.choice(type_2_indices.tolist())
         branch_sequence = sequence_data[:branch_idx]
