@@ -6,6 +6,7 @@ import glob
 import re
 import torch.nn.functional as F
 import random
+import numpy as np
 
 def simple_collate_fn(batch):
     """
@@ -171,12 +172,93 @@ class BnBSequentialDataset(Dataset):
         
         print(f"Total directories: {len(all_dirs)}")
 
+        # 统计序列长度并剔除5%最大长度的数据
+        print("正在统计序列长度以剔除异常数据...")
+        sequence_lengths = []
+        valid_dirs = []
+        
+        for i, dir_path in enumerate(all_dirs):
+            if i % 100 == 0:  # 每处理100个样本打印一次进度
+                print(f"已处理 {i}/{len(all_dirs)} 个样本")
+                
+            try:
+                # 获取序列数据
+                sequence_data = torch.load(dir_path / 'data.pt')
+                type_data = torch.load(dir_path / 'type.pt')
+                
+                # 应用与 __getitem__ 相同的处理逻辑
+                sequence_data = sequence_data[2:]  # 跳过前两个元素
+                type_data = type_data[2:]
+                
+                # 记录序列长度和对应的目录
+                sequence_lengths.append(len(sequence_data))
+                if sequence_data.shape[1] == 8:#done know why ,SETCOVER的数据有的不是8列
+                    valid_dirs.append(dir_path)
+                
+            except Exception as e:
+                print(f"处理样本 {dir_path} 时出错: {e}")
+                continue
+        
+        if not sequence_lengths:
+            print("没有找到有效的序列数据")
+            return []
+        
+        # 计算统计信息
+        sequence_lengths = np.array(sequence_lengths)
+        
+        # 计算95%分位数，剔除5%最大长度的数据
+        length_threshold = np.percentile(sequence_lengths, 95)
+        print(f"序列长度95%分位数: {length_threshold:.2f}")
+        
+        # 筛选出长度小于等于95%分位数的数据
+        filtered_indices = sequence_lengths <= length_threshold
+        filtered_dirs = [valid_dirs[i] for i in range(len(valid_dirs)) if filtered_indices[i]]
+        filtered_lengths = sequence_lengths[filtered_indices]
+        
+        print(f"原始样本数: {len(all_dirs)}")
+        print(f"有效样本数: {len(valid_dirs)}")
+        print(f"剔除异常后样本数: {len(filtered_dirs)}")
+        print(f"剔除的样本数: {len(valid_dirs) - len(filtered_dirs)}")
+        
+        # 输出统计信息
+        stats = {
+            'mean_length': np.mean(filtered_lengths),
+            'max_length': np.max(filtered_lengths),
+            'median_length': np.median(filtered_lengths),
+            'min_length': np.min(filtered_lengths),
+            'std_length': np.std(filtered_lengths),
+            'total_samples': len(filtered_lengths),
+            'length_distribution': {
+                '0-10': np.sum(filtered_lengths <= 10),
+                '11-50': np.sum((filtered_lengths > 10) & (filtered_lengths <= 50)),
+                '51-100': np.sum((filtered_lengths > 50) & (filtered_lengths <= 100)),
+                '101-200': np.sum((filtered_lengths > 100) & (filtered_lengths <= 200)),
+                '201-500': np.sum((filtered_lengths > 200) & (filtered_lengths <= 500)),
+                '500+': np.sum(filtered_lengths > 500),
+                '1000+': np.sum(filtered_lengths > 1000),
+                '2000+': np.sum(filtered_lengths > 2000)
+            }
+        }
+        
+        print(f"\n序列长度统计结果 (剔除异常后):")
+        print(f"总样本数: {stats['total_samples']}")
+        print(f"平均长度: {stats['mean_length']:.2f}")
+        print(f"最大长度: {stats['max_length']}")
+        print(f"最小长度: {stats['min_length']}")
+        print(f"中位数长度: {stats['median_length']:.2f}")
+        print(f"标准差: {stats['std_length']:.2f}")
+        print(f"\n长度分布:")
+        for range_name, count in stats['length_distribution'].items():
+            percentage = (count / stats['total_samples']) * 100
+            print(f"  {range_name}: {count} 个样本 ({percentage:.1f}%)")
+
         if self.max_samples is not None:
             # 随机选择指定数量的样本
-            random.shuffle(all_dirs)
-            all_dirs = all_dirs[:self.max_samples]
+            random.shuffle(filtered_dirs)
+            filtered_dirs = filtered_dirs[:self.max_samples]
+            print(f"随机选择后样本数: {len(filtered_dirs)}")
         
-        return all_dirs
+        return filtered_dirs
     
 
     def __len__(self):
@@ -192,18 +274,35 @@ class BnBSequentialDataset(Dataset):
         node_id = torch.load(dir_path / 'node_id.pt')
         branch_label = torch.load(dir_path / 'branch_label.pt')
 
+        # 暂时这样做，不知道为什么 SETCOVER收集的数据会选择节点1三次,甚至多次
+        # sequence_data = _sequence_data[2:]
+        # type = _type[2:]
+        # cand = _cand[2:]
+        # node_id = _node_id[2:]
+        # branch_label = _branch_label[2:]
+
         # 找到type=1和type=0的位置
-        type_1_indices = torch.where(type == 1)[0][1:]  # select positions, not choose first selct
+        type_1_indices = torch.where(type == 1)[0]  # select positions, not choose first selct
         type_2_indices = torch.where(type == 2)[0]  # branch positions
 
-        select_idx = random.choice(type_1_indices.tolist())
-        select_sequence = sequence_data[:select_idx]
-         
+        select_action = 1 
+        times = 0
+        while select_action == 1 and times < 10:
+            select_idx = random.choice(type_1_indices.tolist())
+            select_sequence = sequence_data[:select_idx]
+            select_action = sequence_data[select_idx][0]
+            times += 1
+
+        if times == 10:
+            print(f"select_idx not in node_id: {select_idx}, path: {dir_path}")
+            return None, None, None, None, None, None, None, None, None
+
         branch_idx = random.choice(type_2_indices.tolist())
         branch_sequence = sequence_data[:branch_idx]
-
-        select_action = sequence_data[select_idx][0]
         branch_action = branch_label[branch_idx]
+
+        if select_action not in node_id:
+            print(f"select_idx not in node_id: {select_idx}")
 
         return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action
     
@@ -243,6 +342,7 @@ def calculate_average_reward(dataset):
     total_reward = 0.0
     for i in range(len(dataset)):
         _ = dataset[i]  # This will compute reward_accum during __getitem__
+        
         dir_path = dataset.trajectories[i]
         pt_files = sorted(list(Path(dir_path).glob("*.pt")),
                         key=lambda p: float(p.name.split("_")[0]))

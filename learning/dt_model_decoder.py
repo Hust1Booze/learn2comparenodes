@@ -100,8 +100,8 @@ class DTModel(nn.Module):
         branch_logits = self.branch_head(branch_sequence_embd)
         select_logits = self.select_head(select_sequence_embd)
 
-        print("branch_logits.shape",branch_logits.shape)
-        print("select_logits.shape",select_logits.shape)
+        # print("branch_logits.shape",branch_logits.shape)
+        # print("select_logits.shape",select_logits.shape)
         # cal branch loss
         branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
         select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_labels, node_ids)
