@@ -62,7 +62,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_mod
 
     sequence_saver.save()
 
-    print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons' )
+    print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time' )
     
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")
@@ -111,8 +111,8 @@ if __name__ == "__main__":
     oracle = 'optimal_plunger'
     problem = 'SETCOVER' #'GISP'
     data_partitions = ['train','valid'] #dont change
-    n_cpu = 8
-    n_instance = 1000
+    n_cpu = 10
+    n_instance = 200
     device = 'cpu'
     debug_model = 0
     
@@ -145,8 +145,8 @@ if __name__ == "__main__":
         save_dir_svm = os.path.join(os.path.dirname(__file__), f'./data_svm/{problem}/{data_partition}')
         
         
-        # n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.2*n_instance)
-        n_keep = n_instance
+        n_keep  = n_instance if data_partition == 'train' or n_instance == -1 else int(0.5*n_instance)
+        #n_keep = n_instance
         instances = list(Path(os.path.join(os.path.dirname(__file__), 
                                            f"../problem_generation/data/{problem}/{data_partition}")).glob("*.lp"))
         # random.shuffle(instances)

@@ -46,12 +46,15 @@ class SequenceSaver():
         cand_tensor = torch.tensor(cand, dtype=torch.int64)
         node_id_tensor = torch.tensor(node_id, dtype=torch.int64)
         branch_label_tensor = torch.tensor(branch_label, dtype=torch.int64)
+        if len(node_id)>=5 :
+            torch.save(data_tensor, self.save_path + '/data.pt')
+            torch.save(type_tensor, self.save_path + '/type.pt')
+            torch.save(cand_tensor, self.save_path + '/cand.pt')
+            torch.save(node_id_tensor, self.save_path + '/node_id.pt')
+            torch.save(branch_label_tensor, self.save_path + '/branch_label.pt')
+            torch.save(self.milp_state, self.save_path + '/state.pt')
+            print(f"Saved sequence to {self.save_path}")
+        else:
+            print(f"Not saved sequence to {self.save_path} because of too short")
 
-        torch.save(data_tensor, self.save_path + '/data.pt')
-        torch.save(type_tensor, self.save_path + '/type.pt')
-        torch.save(cand_tensor, self.save_path + '/cand.pt')
-        torch.save(node_id_tensor, self.save_path + '/node_id.pt')
-        torch.save(branch_label_tensor, self.save_path + '/branch_label.pt')
-        torch.save(self.milp_state, self.save_path + '/state.pt')
 
-        print(f"Saved sequence to {self.save_path}")

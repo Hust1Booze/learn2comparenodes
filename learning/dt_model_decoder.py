@@ -5,7 +5,7 @@ from gnnencoder import GNNEncoder
 
 
 class DTModel(nn.Module):
-    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
+    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False, use_decoder = True):
         super().__init__()
         self.d_model = d_model  # 保存d_model参数
         self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
@@ -29,6 +29,7 @@ class DTModel(nn.Module):
 
         self.temperature = temperature
         self.use_soft_score_label = use_soft_score_label
+        self.use_decoder = use_decoder
 
         self.branch_var_embedding = nn.Embedding(self.max_vars, d_model)        # for branch var
         self.reward_embedding = nn.Linear(1, d_model)                           # for reward (scalar → vector)
@@ -86,18 +87,18 @@ class DTModel(nn.Module):
         
         _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
 
-        encoder_select_sequence_embd = self.encoder_select(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
-        encoder_branch_sequence_embd = self.encoder_branch(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
-        decoder_select_sequence_embd = self.decoder_select(encoder_select_sequence_embd, encoder_branch_sequence_embd, tgt_key_padding_mask=select_sequence_masks, memory_key_padding_mask=branch_sequence_masks)
-        decoder_branch_sequence_embd = self.decoder_branch(encoder_branch_sequence_embd, encoder_select_sequence_embd, tgt_key_padding_mask=branch_sequence_masks, memory_key_padding_mask=select_sequence_masks)
+        if self.use_decoder:
+            encoder_select_sequence_embd = self.encoder_select(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
+            encoder_branch_sequence_embd = self.encoder_branch(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
+            select_sequence_embd = self.decoder_select(encoder_select_sequence_embd, states_embd, tgt_key_padding_mask=select_sequence_masks, memory_key_padding_mask=states_mask)
+            branch_sequence_embd = self.decoder_branch(states_embd, encoder_branch_sequence_embd, tgt_key_padding_mask=states_mask, memory_key_padding_mask=branch_sequence_masks)
 
-        print("decoder_branch_sequence_embd.shape",decoder_branch_sequence_embd.shape)
-        print("decoder_select_sequence_embd.shape",decoder_select_sequence_embd.shape)
-        # select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
-        # branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
+        else:
+            select_sequence_embd = self.deal_select(_select_sequence_embd, select_sequence_masks, states_embd, states_mask)
+            branch_sequence_embd = self.deal_branch(_branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
 
-        branch_logits = self.branch_head(decoder_branch_sequence_embd)
-        select_logits = self.select_head(decoder_select_sequence_embd)
+        branch_logits = self.branch_head(branch_sequence_embd)
+        select_logits = self.select_head(select_sequence_embd)
 
         print("branch_logits.shape",branch_logits.shape)
         print("select_logits.shape",select_logits.shape)

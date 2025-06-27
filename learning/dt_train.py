@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward, calculate_average_reward_static, simple_collate_fn
-from dt_model import DTModel
+from dt_model_decoder import DTModel
 import time
 import gc
 import os
@@ -29,9 +29,9 @@ def train():
     # print(f"Average reward: {avg_reward}")
     
     # 创建DataLoader
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True,collate_fn=simple_collate_fn)
+    dataloader = DataLoader(dataset, batch_size=16, shuffle=True,collate_fn=simple_collate_fn)
 
-    valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=True,collate_fn=simple_collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=True,collate_fn=simple_collate_fn)
     
     # 创建优化器
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)

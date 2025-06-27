@@ -22,8 +22,9 @@ def generate_instances(instances, save_dir) :
         instance_name = instance.stem  # 获取不带扩展名的文件名
         sol_file = os.path.join(save_dir, f"{instance_name}.sol")
         model.writeBestSol(sol_file)
-        print(f'problem {instance} solverd !')
 
+        print(f"Solve instance  "+ str(instance).split("/")[-1] + f' with {model.getNNodes()} nodes, {model.getSolvingTime()} time' )
+        
         with open("nnodes.csv", "a+") as f:
             f.write(f"{model.getNNodes()},")
             f.close()
