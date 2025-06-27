@@ -89,7 +89,6 @@ class BNB_Node_Selector(Nodesel):
     def set_LP_feature_recorder(self, LP_feature_recorder):
         self.comp_behaviour_saver.set_LP_feature_recorder(LP_feature_recorder)
 
-    @torch.inference_mode()
     def nodeselect(self):
         self.step+=1
         #if self.step>=750:
@@ -111,7 +110,7 @@ class BNB_Node_Selector(Nodesel):
             node = self.model.getBestboundNode()
         
         if self.default_selector :
-            node = self.model.getBestboundNode()
+            node = self.model.getBestNode()
         else:
             rank_node_ids = self.comb_model.get_select_node_decision(*self.bnbstates.get_dt_input())
             node = None
@@ -139,13 +138,66 @@ class BNB_Node_Selector(Nodesel):
         self.bnbstates.receive_states(data)
         return {"selnode": node}
     
-    def nodecomp(self, node1, node2):
-        #n1 = node1.getNumber()
-        #n2 = node2.getNumber()
-        #p1 = self.logit_lookup # type: ignore
-        #p = p1[n1].exp() / (p1[n1].exp() + p1[n2].exp())
-        return -1 if node1.getLowerbound() <= node2.getLowerbound() else 1
-        #return -1 if torch.rand(1) < 0.5 else 1
+    def nodecomp(self, node1, node2, return_type=False):
+        
+        self.comp_counter += 1
+        
+        if self.oracle_type == "optimal_plunger":            
+        
+            d1 = self.is_sol_in_domaine(self.optsol, node1)
+            d2 = self.is_sol_in_domaine(self.optsol, node2)
+            inv = np.random.rand() < self.inv_proba
+            
+            if d1 and d2:
+                res, comp_type = self.dfs_nodecomp(node1, node2), 0
+            elif d1:
+                res = comp_type = -1
+                self.inf_counter += 1
+                
+            
+            elif d2:
+                res = comp_type = 1
+                self.inf_counter += 1
+            
+            else:
+                res, comp_type = self.estimate_nodecomp(node1, node2), 10              
+            
+            inv_res = -1 if res == 1 else 1
+            res = inv_res if inv else res
+            
+            return res if not return_type  else  (res, comp_type)
+        else:
+            raise NotImplementedError
+
+    
+    def is_sol_in_domaine(self, sol, node):
+        #By partionionning, it is sufficient to only check what variable have
+        #been branched and if sol is in [lb, up]_v for v a branched variable
+        
+        #By partionionning, it is sufficient to only check what variable have
+        #been branched and if sol is in [lb, up]_v for v a branched variable
+        branches = [[], [], []]  # 分别存 bvar, bound, btype
+
+        while node.getParent() is not None:
+            bvars, bounds, btypes = node.getParentBranchings()
+            branches[0] += bvars
+            branches[1] += bounds
+            branches[2] += btypes
+            node = node.getParent()
+        
+        for bvar, bbound, btype in zip(*branches): 
+            if btype == 0:#LOWER BOUND
+                if sol[bvar] < bbound:
+                    return False
+            else: #btype==1:#UPPER BOUND
+                if sol[bvar] > bbound:
+                    return False
+        
+        return True
+            
+            
+    def setOptsol(self, optsol):
+        self.optsol = optsol
 
 
         
