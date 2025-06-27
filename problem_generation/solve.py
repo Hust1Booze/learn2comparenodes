@@ -23,6 +23,13 @@ def generate_instances(instances, save_dir) :
         sol_file = os.path.join(save_dir, f"{instance_name}.sol")
         model.writeBestSol(sol_file)
         print(f'problem {instance} solverd !')
+
+        with open("nnodes.csv", "a+") as f:
+            f.write(f"{model.getNNodes()},")
+            f.close()
+        with open("times.csv", "a+") as f:
+            f.write(f"{model.getSolvingTime()},")
+            f.close()
         
 
 def distribute(n_instance, n_cpu):
@@ -46,9 +53,8 @@ if __name__ == "__main__":
     problem = 'SETCOVER'
     timelimit = 7200.0
     solveInstance = True
-    n_instance = 200
+    n_instance = 1000
     seed = 0
-    data_partition = 'valid'
     
 
     # seed = 0
@@ -80,12 +86,17 @@ if __name__ == "__main__":
         if sys.argv[i] == '-n_cpu':
             n_cpu = int(sys.argv[i + 1])
     
-    print("Summary for GISP generation")
+    print("Summary for generation")
     print(f"n_instance    :     {n_instance}")
     print(f"n_cpu         :     {n_cpu} ")
     print(f"solve         :     {solveInstance}")
     
-        
+    with open("nnodes.csv", "w") as f:
+        f.write("")
+        f.close()
+    with open("times.csv", "w") as f:
+        f.write("")
+        f.close()
             
     cpu_count = md.cpu_count()//2 if n_cpu == None else n_cpu
     
@@ -102,7 +113,6 @@ if __name__ == "__main__":
                                                 instances=instances[ p1 : p2], 
                                                 save_dir=save_dir))
                 for p,(p1,p2) in enumerate(distribute(len(instances), n_cpu))]
-
     
  
     try:
@@ -114,6 +124,15 @@ if __name__ == "__main__":
     b = list(map(lambda p: p.join(), processes)) #join processes
     print('Solved')
  
+    nnodes = np.genfromtxt("nnodes.csv", delimiter=",")[:-1]
+    times = np.genfromtxt("times.csv", delimiter=",")[:-1]
+        
+    print(f"Mean number of node created  {np.mean(nnodes)}")
+    print(f"Mean solving time  {np.mean(times)}")
+    print(f"Median number of node created  {np.median(nnodes)}")
+    print(f"Median solving time  {np.median(times)}")
+
+    
     
             
         

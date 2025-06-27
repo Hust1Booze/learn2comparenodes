@@ -12,7 +12,7 @@ from pathlib import Path
 import gisp
 import fcmcnf
 import wpms
-
+from torch.multiprocessing import Process, set_start_method
 
 
 def distribute(n_instance, n_cpu):

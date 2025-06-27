@@ -11,6 +11,8 @@ import time
 from brancher import StrongBranchingRule
 from selector import OracleNodeSelRecorder, ScipEvent
 from saver import SequenceSaver
+from torch.multiprocessing import Process, set_start_method
+from functools import partial
 
 def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_model):
     
@@ -110,17 +112,9 @@ if __name__ == "__main__":
     problem = 'SETCOVER' #'GISP'
     data_partitions = ['train','valid'] #dont change
     n_cpu = 8
-    n_instance = 200
+    n_instance = 1000
     device = 'cpu'
     debug_model = 0
-
-    with open("nnodes.csv", "w") as f:
-        f.write("")
-        f.close()
-    with open("times.csv", "w") as f:
-        f.write("")
-        f.close()
-        
     
     #Initializing the model 
     for i in range(1, len(sys.argv), 2):
@@ -140,7 +134,12 @@ if __name__ == "__main__":
    
   
     for data_partition in data_partitions:
-        
+        with open("nnodes.csv", "w") as f:
+            f.write("")
+            f.close()
+        with open("times.csv", "w") as f:
+            f.write("")
+            f.close()
 
         save_dir = os.path.join(os.path.dirname(__file__), f'./data/{problem}/{data_partition}')
         save_dir_svm = os.path.join(os.path.dirname(__file__), f'./data_svm/{problem}/{data_partition}')
@@ -155,31 +154,31 @@ if __name__ == "__main__":
         
         print(f"Generating {data_partition} samples from {len(instances)} instances using oracle {oracle}", flush= True)
         
-        run_episodes(oracle_type=oracle,
-                    instances=instances, 
-                    save_dir=save_dir,
-                    save_dir_svm=save_dir_svm,
-                    device=device,
-                    debug_model=debug_model)
+        # run_episodes(oracle_type=oracle,
+        #             instances=instances, 
+        #             save_dir=save_dir,
+        #             save_dir_svm=save_dir_svm,
+        #             device=device,
+        #             debug_model=debug_model)
       
-        # processes = [ Process(name=f"worker {p}", 
-        #                                 target=partial(run_episodes,
-        #                                                 oracle_type=oracle,
-        #                                                 instances=instances[ p1 : p2], 
-        #                                                 save_dir=save_dir,
-        #                                                 save_dir_svm=save_dir_svm,
-        #                                                 device=device,
-        #                                                 debug_model=debug_model))
-        #                 for p,(p1,p2) in enumerate(distribute(len(instances), n_cpu))]
+        processes = [ Process(name=f"worker {p}", 
+                                        target=partial(run_episodes,
+                                                        oracle_type=oracle,
+                                                        instances=instances[ p1 : p2], 
+                                                        save_dir=save_dir,
+                                                        save_dir_svm=save_dir_svm,
+                                                        device=device,
+                                                        debug_model=debug_model))
+                        for p,(p1,p2) in enumerate(distribute(len(instances), n_cpu))]
         
         
-        # try:
-        #     set_start_method('spawn')
-        # except RuntimeError:
-        #     ''
+        try:
+            set_start_method('spawn')
+        except RuntimeError:
+            ''
             
-        # a = list(map(lambda p: p.start(), processes)) #run processes
-        # b = list(map(lambda p: p.join(), processes)) #join processes
+        a = list(map(lambda p: p.start(), processes)) #run processes
+        b = list(map(lambda p: p.join(), processes)) #join processes
         
                 
         nnodes = np.genfromtxt("nnodes.csv", delimiter=",")[:-1]
