@@ -6,8 +6,7 @@ class SequenceSaver():
         self.save_path = save_path
         self.milp_state = None
         self.squence = []
-        if not os.path.exists(self.save_path) :
-            os.makedirs(self.save_path , exist_ok=True)
+
 
     def save(self):
         data = []
@@ -47,6 +46,8 @@ class SequenceSaver():
         node_id_tensor = torch.tensor(node_id, dtype=torch.int64)
         branch_label_tensor = torch.tensor(branch_label, dtype=torch.int64)
         if len(node_id)>=5 :
+            if not os.path.exists(self.save_path) :
+                os.makedirs(self.save_path , exist_ok=True)
             torch.save(data_tensor, self.save_path + '/data.pt')
             torch.save(type_tensor, self.save_path + '/type.pt')
             torch.save(cand_tensor, self.save_path + '/cand.pt')
