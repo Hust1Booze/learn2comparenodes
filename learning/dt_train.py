@@ -40,8 +40,8 @@ def train():
     model = model.to(device)
     
     # 创建数据集
-    dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train", max_samples=max_samples)
-    valid_dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=max_samples)
+    dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer_normal/learn2comparenodes/node_selection/data/{problem}/train", max_samples=max_samples)
+    valid_dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer_normal/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=max_samples)
     
     # 创建DataLoader
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)

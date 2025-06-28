@@ -1,9 +1,9 @@
 batch_size : 32
-problem : "GISP"
+problem : "SETCOVER"
 
 select_loss_weight : 0.0
 branch_loss_weight : 1
 
-lr : 5e-4
+lr : 0.0005
 
 max_samples : 1000
