@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
-from dt_model_decoder import DTModel
+from dt_model import DTModel
 import time
 import deepspeed
 import os
@@ -45,12 +45,6 @@ def train():
         }
     }
 
-    if model_engine.global_rank == 0:
-        print(f'~'*80)
-        print(f'Config:\n{config}')
-        print(f'DS Config:\n{ds_config}')
-        print(f'~'*80)
-
     model = DTModel()
     dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train/", max_samples=max_samples)
     valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid/", max_samples=max_samples)
@@ -61,6 +55,12 @@ def train():
         config=ds_config
     )
     
+    if model_engine.global_rank == 0:
+        print(f'~'*80)
+        print(f'Config:\n{config}')
+        print(f'DS Config:\n{ds_config}')
+        print(f'~'*80)
+
     # 只在主进程创建TensorBoard writer
     writer = None
     best_branch_top1 = 0.0  # 用于跟踪最佳branch_top1

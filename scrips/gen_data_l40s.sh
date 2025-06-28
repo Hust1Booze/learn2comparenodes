@@ -21,7 +21,7 @@ lscpu
 
 # python problem_generation/solve.py -data_partition train -n_cpu 32
 # python problem_generation/solve.py -data_partition valid -n_cpu 20
-python node_selection/behaviour_gen.py -n_cpu 100 -problem GISP |tee logs/gen_gisp_no_random.txt
+python node_selection/behaviour_gen.py -n_cpu 100 -problem SETCOVER |tee logs/gen_setcover_no_random.txt
 
 # python node_selection/behaviour_gen.py |tee logs/gen_new_data_2.txt
 
