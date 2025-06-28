@@ -24,11 +24,12 @@ class Brancher(sp.Branchrule):
 
 class StrongBranchingRule(sp.Branchrule):
 
-    def __init__(self, scip, sequence_saver, save_dir):
+    def __init__(self, scip, sequence_saver, save_dir, use_gasse_representation, random_branching_prob = 0):
         self.scip = scip
         self.save_dir = save_dir
-
         self.saver = sequence_saver
+        self.use_gasse_representation = use_gasse_representation
+        self.random_branching_prob = random_branching_prob
 
         varrs = self.scip.getVars() # equal to variables nums in bipartite graph representation
         original_conss = self.scip.getConss()
@@ -37,6 +38,12 @@ class StrongBranchingRule(sp.Branchrule):
         self.var2idx = dict([ (str_var, idx) for idx, var in enumerate(self.varrs) for str_var in [str(var)]  ])
 
     def branchexeclp(self, allowaddcons):
+
+        _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
+        node_number = self.model.getCurrentNode().getNumber()
+        if node_number == 1 and self.use_gasse_representation:
+            self.converse_to_gasse_representation()
+            
 
         branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.scip.getLPBranchCands()
 
@@ -111,24 +118,24 @@ class StrongBranchingRule(sp.Branchrule):
         if lperror:
             return {"result": SCIP_RESULT.DIDNOTRUN}
 
-        # action = None
-        # #10%的概率随机选择分支变量，90%的概率选择得分最高的变量
-        # if random.random() < 0.1:
-        #     # 随机选择
-        #     random_cand_idx = random.randint(0, npriocands - 1)
-        #     action = random_cand_idx
-        #             # Branch on the variable with the largest score
-        #     down_child, eq_child, up_child = self.model.branchVarVal(
-        #         branch_cands[random_cand_idx], branch_cands[random_cand_idx].getLPSol())
-        # else:
-        #     action =  best_cand_idx
-        #     # Branch on the variable with the largest score
-        #     down_child, eq_child, up_child = self.model.branchVarVal(
-        #         branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
-        action =  best_cand_idx
-        # Branch on the variable with the largest score
-        down_child, eq_child, up_child = self.model.branchVarVal(
-            branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
+        action = None
+        #10%的概率随机选择分支变量，90%的概率选择得分最高的变量
+        if random.random() < self.random_branching_prob:
+            # 随机选择
+            random_cand_idx = random.randint(0, npriocands - 1)
+            action = random_cand_idx
+                    # Branch on the variable with the largest score
+            down_child, eq_child, up_child = self.model.branchVarVal(
+                branch_cands[random_cand_idx], branch_cands[random_cand_idx].getLPSol())
+        else:
+            action =  best_cand_idx
+            # Branch on the variable with the largest score
+            down_child, eq_child, up_child = self.model.branchVarVal(
+                branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
+        # action =  best_cand_idx
+        # # Branch on the variable with the largest score
+        # down_child, eq_child, up_child = self.model.branchVarVal(
+        #     branch_cands[best_cand_idx], branch_cands[best_cand_idx].getLPSol())
 
         # Update the bounds of the down node and up node. Some cols might not exist due to pricing
         if self.scip.allColsInLP():
@@ -137,7 +144,7 @@ class StrongBranchingRule(sp.Branchrule):
             if up_child is not None and up_bounds[best_cand_idx] is not None:
                 self.scip.updateNodeLowerbound(up_child, up_bounds[best_cand_idx])
 
-        node_number = self.model.getCurrentNode().getNumber()
+        
         cands_indexs = []
         current_time = time.time()
         file_path = self.save_dir + f"/{current_time:.4f}_branch_{node_number}.pt"
@@ -150,22 +157,46 @@ class StrongBranchingRule(sp.Branchrule):
             else:
                 print("error in save branch_cands info")
             cands_indexs.append(_var_idx) 
-        info = {
-            "type":'branch',
-            "node_number" : node_number,
-            "candidate_indices": cands_indexs,
-            "scores": scores,
-            "selected_var_index": best_cand_idx
-        }
+
+
+        if self.use_gasse_representation:
+            cands_indexs = [c.getCol().getLPPos() for c in branch_cands]
 
         data = {
             "type" : "branch",
-            "data" : [action],
-            "branch_label" : best_cand_idx,
+            "data" : [cands_indexs[action]] + _row_features[cands_indexs[action]],
+            "branch_label" : cands_indexs[action],
             "cand" : cands_indexs
         }
-
         self.saver.squence.append(data)
-        # print(f'branch on the node {node_number} and  var {branch_cands[best_cand_idx]}')
-        # torch.save(info, file_path)
+
         return {"result": SCIP_RESULT.BRANCHED}
+    
+    def converse_to_gasse_representation(self):
+
+        _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
+
+        g =  self.saver.milp_state
+        constraint_features, edge_indices, edge_features, variable_features = g[0],g[1],g[2],g[3]
+        for idx in range(len(edge_indices)):
+            cur_edge = [edge_indices[0,idx].item(), edge_indices[1,idx].item(), edge_features[idx].item()]
+            if cur_edge not in _edge_features:
+                print('why not in edge_features')
+                # cur_edge = [edge_indices[1:idx], edge_indices[0:idx], edge_features[idx]]
+                # if cur_edge not in _edge_features:
+                    
+        # 修改表征形式为 现在gnn输入格式
+        _col_features = torch.tensor(_col_features, dtype=torch.float32)
+        _row_features = torch.tensor(_row_features, dtype=torch.float32)
+        _edge_indices = []
+        _edge_features_ = []
+        for i in range(len(_edge_features)):
+            _edge_indices.append([_edge_features[i][0], _edge_features[i][1]])
+            _edge_features_.append(_edge_features[i][2])
+        _edge_indices = torch.tensor(_edge_indices, dtype=torch.int32).transpose(0,1)
+        _edge_features_ = torch.tensor(_edge_features_, dtype=torch.float32)
+
+        # 重新创建元组而不是直接修改
+        self.saver.milp_state = (_row_features, _edge_indices, _edge_features_, _col_features, g[4], g[5])
+
+        

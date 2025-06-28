@@ -33,6 +33,7 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         if select_node_number == 1:
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, select_node['selnode'])
             self.saver.milp_state = g
+
         leaves, children, siblings = self.model.getOpenNodes()
         open_nodes = leaves + children + siblings
 
@@ -40,6 +41,20 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         for open_node in open_nodes:
             open_nodes_number.append(open_node.getNumber())
 
+        gap = self.model.getGap()
+        LPObjVal = self.model.getLPObjVal()
+        local_estimate = self.model.getLocalEstimate()
+        obj_val = self.model.getObjVal()
+        primal_bound = self.model.getPrimalbound()
+        dualbound = self.model.getDualbound()
+        dualboundRoot = self.model.getDualboundRoot()
+
+        obj_val_gap = obj_val - local_estimate
+        obj_val_gap_ratio = obj_val_gap / obj_val
+        obj_val_gap_ratio = obj_val_gap_ratio if obj_val_gap_ratio > 0 else 0
+        obj_val_gap_ratio = obj_val_gap_ratio if obj_val_gap_ratio < 1 else 1
+        obj_val_gap_ratio = obj_val_gap_ratio if obj_val_gap_ratio > 0 else 0
+        
         data = {
             "type" : "select",
             "data" : [select_node_number],
@@ -113,6 +128,7 @@ class ScipEvent(Eventhdlr):
         if(event.getName() == 'NODEINFEASIBLE'):
             pass
         if(event.getName() == 'NODEFOCUSED'):
+            print('debug')
             pass
         if(event.getName() == 'NODEBRANCHED'):
             leaves, children, siblings = self.model.getOpenNodes()
@@ -136,6 +152,17 @@ class ScipEvent(Eventhdlr):
 
                     #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
                     child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]
+                    lb = open_node.getLowerbound()
+                    estimate = open_node.getEstimate()
+
+                    gap = self.model.getGap()
+                    LPObjVal = self.model.getLPObjVal()
+                    local_estimate = self.model.getLocalEstimate()
+                    obj_val = self.model.getObjVal()
+                    primal_bound = self.model.getPrimalbound()
+                    dualbound = self.model.getDualbound()
+                    dualboundRoot = self.model.getDualboundRoot()
+                    
                     data = {
                         "type" : "node",
                         "data" : child_node,

@@ -14,7 +14,7 @@ from saver import SequenceSaver
 from torch.multiprocessing import Process, set_start_method
 from functools import partial
 
-def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_model):
+def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_model):
     
     model = sp.Model()
     model.hideOutput()
@@ -50,7 +50,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device,debug_mod
     scipEvent = ScipEvent(model,sequence_saver,device)
     model.includeEventhdlr(scipEvent, "ScipEvent", "Event handler when nodes are pouned")
 
-    brancher = StrongBranchingRule(model,sequence_saver,save_dir)
+    brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=True, random_branching_prob=0)
     model.includeBranchrule(
     branchrule=brancher,
     name="BNB_Brancher",
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     
     oracle = 'optimal_plunger'
-    problem = 'SETCOVER' #'GISP'
+    problem = 'GISP' #'GISP'
     data_partitions = ['train','valid'] #dont change
     n_cpu = 1
     n_instance = 1000

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import GraphConv
 
 class GNNEncoder(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, use_gasse_representation = False):
         super().__init__()
         
         self.emb_size = emb_size = 32 #uniform node feature embedding dim
@@ -14,9 +14,14 @@ class GNNEncoder(torch.nn.Module):
         hidden_dim3 = 32
         
         # static data
-        cons_nfeats = 4
-        edge_nfeats = 1
-        var_nfeats = 6
+        if use_gasse_representation:
+            cons_nfeats = 14
+            edge_nfeats = 1
+            var_nfeats = 19
+        else:
+            cons_nfeats = 4
+            edge_nfeats = 1
+            var_nfeats = 6
         
 
         # CONSTRAINT EMBEDDING
