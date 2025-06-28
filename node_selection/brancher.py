@@ -150,17 +150,10 @@ class StrongBranchingRule(sp.Branchrule):
             else:
                 print("error in save branch_cands info")
             cands_indexs.append(_var_idx) 
-        info = {
-            "type":'branch',
-            "node_number" : node_number,
-            "candidate_indices": cands_indexs,
-            "scores": scores,
-            "selected_var_index": best_cand_idx
-        }
 
         data = {
             "type" : "branch",
-            "data" : [cands_indexs[action]],
+            "data" : [best_cand_idx],
             "branch_label" : cands_indexs[best_cand_idx],
             "cand" : cands_indexs
         }

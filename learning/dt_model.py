@@ -224,10 +224,12 @@ class DTModel(nn.Module):
 
         batch_indices = torch.arange(batch_size, device=branch_logits.device)
         # labels 就表示label在cands中的位置
-        #target = branch_cands[batch_indices, branch_labels.to(branch_logits.device)]     
+        target = branch_cands[batch_indices, branch_labels.to(branch_logits.device)]     
 
         # branch_labels 是目标变量的索引，直接使用
-        target = branch_labels.to(branch_logits.device) 
+        #target = branch_labels.to(branch_logits.device) 
+ 
+
         # 计算交叉熵损失
         loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
         

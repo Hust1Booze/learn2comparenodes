@@ -267,7 +267,7 @@ class BnBSequentialDataset(Dataset):
         type = torch.load(dir_path / 'type.pt')
         cand = torch.load(dir_path / 'cand.pt')
         node_id = torch.load(dir_path / 'node_id.pt')
-        branch_label = torch.load(dir_path / 'branch_label.pt')
+        #branch_label = torch.load(dir_path / 'branch_label.pt')
 
         if sequence_data.shape[0]> 2000 :
             print(f"sequence_data.shape[0]> 2000: {sequence_data.shape[0]}, path: {dir_path}")
@@ -298,7 +298,7 @@ class BnBSequentialDataset(Dataset):
 
         branch_idx = random.choice(type_2_indices.tolist())
         branch_sequence = sequence_data[:branch_idx]
-        branch_action = branch_label[branch_idx]
+        branch_action = sequence_data[branch_idx][0]
 
         if select_action not in node_id:
             print(f"select_idx not in node_id: {select_idx}")
