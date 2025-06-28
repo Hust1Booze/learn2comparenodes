@@ -10,11 +10,27 @@ import os
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 import datetime
+import yaml
+
 
 def train():
 
-    batch_size = 32
-    problem = "GISP"
+    with open('./learning/dt_train.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    # print info
+    print('\n\n\n')
+    print(f'~'*80)
+    print(f'Config:\n{config}')
+    print(f'~'*80)
+
+
+    batch_size = config['batch_size']
+    problem = config['problem']
+    max_samples = config['max_samples']
+    select_loss_weight = config['select_loss_weight']
+    branch_loss_weight = config['branch_loss_weight']
+    lr = config['lr']
+
     # 检查CUDA是否可用
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -24,29 +40,15 @@ def train():
     model = model.to(device)
     
     # 创建数据集
-    dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train", max_samples=1000)
-    valid_dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=1000)
-    # 计算平均奖励
-    # avg_reward = calculate_average_reward_static(dataset)
-    # print(f"Average reward: {avg_reward}")
+    dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train", max_samples=max_samples)
+    valid_dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=max_samples)
     
     # 创建DataLoader
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
-
     valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
     
     # 创建优化器
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
-    
-
-    select_loss_weight = 0.0
-    branch_loss_weight = 1
-    
-    # 创建检查点目录
-    os.makedirs("./checkpoints", exist_ok=True)
-    
-    # 创建模型保存目录
-    os.makedirs("./models", exist_ok=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     
     # 跟踪最佳验证branch_top1准确率
     best_branch_top1 = 0.0
@@ -55,10 +57,11 @@ def train():
     current_time = datetime.datetime.now().strftime('%b%d_%H-%M-%S')
     log_dir = f'./logs/train_{current_time}'
     
-    # 确保日志目录存在
     os.makedirs(log_dir, exist_ok=True)
-    
+    os.makedirs("./checkpoints", exist_ok=True)
+    os.makedirs("./models", exist_ok=True)
     writer = SummaryWriter(log_dir)
+
     print(f"TensorBoard日志将保存到: {log_dir}")
     
     for epoch in range(100000):

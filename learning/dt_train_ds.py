@@ -10,20 +10,28 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 import numpy as np
+import yaml
 # CUDA_VISIBLE_DEVICES = int(os.environ[“LOCAL_RANK”])
                           
 def train():
 
-    batch_size = 16
-    problem = 'SETCOVER'
-    # 解析命令行参数（DeepSpeed需要）
+    with open('./learning/dt_train_ds.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+
+    batch_size = config['batch_size']
+    problem = config['problem']
+    max_samples = config['max_samples']
+    select_loss_weight = config['select_loss_weight']
+    branch_loss_weight = config['branch_loss_weight']
+    lr = config['lr']
+
     ds_config = {
         "train_micro_batch_size_per_gpu": batch_size,
          #"gradient_accumulation_steps": 4,
         "optimizer": {
             "type": "Adam",
             "params": {
-                "lr": 5e-4
+                "lr": lr
             }
         },
         "fp16": {
@@ -37,11 +45,15 @@ def train():
         }
     }
 
+    if model_engine.global_rank == 0:
+        print(f'~'*80)
+        print(f'Config:\n{config}')
+        print(f'DS Config:\n{ds_config}')
+        print(f'~'*80)
+
     model = DTModel()
-    
-    # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train/", max_samples=1000)
-    valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid/", max_samples=500)
+    dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train/", max_samples=max_samples)
+    valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid/", max_samples=max_samples)
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
@@ -52,7 +64,6 @@ def train():
     # 只在主进程创建TensorBoard writer
     writer = None
     best_branch_top1 = 0.0  # 用于跟踪最佳branch_top1
-
     save_dir = None
 
     if model_engine.global_rank == 0:
@@ -69,17 +80,10 @@ def train():
         print(f"TensorBoard日志将保存到: {log_dir}")
         print(f"模型检查点将保存到: {save_dir}")
     
-    # 计算平均奖励（使用静态方法，不需要模型前向传播）
-    # if model_engine.global_rank == 0:  # 只在主进程打印
-    #     avg_reward = calculate_average_reward_static(dataset)
-    #     print(f"Average reward: {avg_reward}")
-    
+
     # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
     valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
-
-    select_loss_weight = 0.05
-    branch_loss_weight = 1
     
     for epoch in range(100000):
         model_engine.train()
