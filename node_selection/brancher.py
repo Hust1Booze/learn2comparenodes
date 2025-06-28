@@ -160,8 +160,8 @@ class StrongBranchingRule(sp.Branchrule):
 
         data = {
             "type" : "branch",
-            "data" : [action],
-            "branch_label" : best_cand_idx,
+            "data" : [cands_indexs[action]],
+            "branch_label" : cands_indexs[best_cand_idx],
             "cand" : cands_indexs
         }
 
