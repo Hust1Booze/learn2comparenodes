@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward, calculate_average_reward_static, simple_collate_fn
-from dt_model_decoder import DTModel
+from dt_model import DTModel
 import time
 import gc
 import os
@@ -12,6 +12,9 @@ from torch.utils.tensorboard import SummaryWriter
 import datetime
 
 def train():
+
+    batch_size = 32
+    problem = "GISP"
     # 检查CUDA是否可用
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -21,16 +24,16 @@ def train():
     model = model.to(device)
     
     # 创建数据集
-    dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/train", max_samples=1000)
-    valid_dataset = BnBSequentialDataset("/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/valid", max_samples=1000)
+    dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train", max_samples=1000)
+    valid_dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=1000)
     # 计算平均奖励
     # avg_reward = calculate_average_reward_static(dataset)
     # print(f"Average reward: {avg_reward}")
     
     # 创建DataLoader
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=True,collate_fn=simple_collate_fn)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
 
-    valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=True,collate_fn=simple_collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
     
     # 创建优化器
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)

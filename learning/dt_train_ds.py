@@ -15,7 +15,7 @@ import numpy as np
 def train():
 
     batch_size = 16
-    
+    problem = 'SETCOVER'
     # 解析命令行参数（DeepSpeed需要）
     ds_config = {
         "train_micro_batch_size_per_gpu": batch_size,
@@ -40,8 +40,8 @@ def train():
     model = DTModel()
     
     # 先创建数据集（在DeepSpeed初始化之前）
-    dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/train/", max_samples=1000)
-    valid_dataset = BnBSequentialDataset("/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/SETCOVER/valid/", max_samples=500)
+    dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train/", max_samples=1000)
+    valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid/", max_samples=500)
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
