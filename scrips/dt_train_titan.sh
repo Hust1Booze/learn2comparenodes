@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -o job.%j.out
-#SBATCH --partition=l40s
-#SBATCH -J dt_bnb
-#SBATCH -N 1
-#SBATCH --ntasks-per-node=4   
-#SBATCH --gres=gpu:4
-#SBATCH --qos=dcgpu
+#SBATCH -o job.%j.out                 # 输出文件名（%j表示job id）
+#SBATCH --partition=titan            # 分区名
+#SBATCH --qos=titan                  # QoS（服务等级）
+#SBATCH -J dt_bnb              # 作业名
+#SBATCH --nodes=1                    # 申请1个节点
+#SBATCH --ntasks-per-node=4         # 启动1个任务（一般只要1）
+#SBATCH --gres=gpu:4                 # 
 
 nvidia-smi
 # module load cuda/11.8
@@ -13,10 +13,6 @@ source activate bnb
 
 root_dir=$(pwd)
 echo "root_dir:"${root_dir}
-
-# 创建checkpoints目录
-mkdir -p checkpoints
-
 
 # 设置环境变量以解决GCC版本兼容性问题
 export TORCH_CUDA_ARCH_LIST="8.0"

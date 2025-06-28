@@ -36,7 +36,7 @@ def train():
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
     
 
-    select_loss_weight = 0.1
+    select_loss_weight = 0.0
     branch_loss_weight = 1
     
     # 创建检查点目录

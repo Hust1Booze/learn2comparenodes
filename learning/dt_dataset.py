@@ -172,15 +172,10 @@ class BnBSequentialDataset(Dataset):
         
         print(f"Total directories: {len(all_dirs)}")
 
-        # 统计序列长度并剔除5%最大长度的数据
-        print("正在统计序列长度以剔除异常数据...")
         sequence_lengths = []
         valid_dirs = []
         
         for i, dir_path in enumerate(all_dirs):
-            if i % 100 == 0:  # 每处理100个样本打印一次进度
-                print(f"已处理 {i}/{len(all_dirs)} 个样本")
-                
             try:
                 # 获取序列数据
                 sequence_data = torch.load(dir_path / 'data.pt')

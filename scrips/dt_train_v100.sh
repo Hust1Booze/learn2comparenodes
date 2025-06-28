@@ -2,9 +2,9 @@
 #SBATCH -o job.%j.out
 #SBATCH --partition=v100
 #SBATCH -J dt_bnb
-#SBATCH -N 2
-#SBATCH --ntasks-per-node=6
-#SBATCH --gres=gpu:6
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
 #SBATCH --qos=dcgpu
 
 nvidia-smi
@@ -24,5 +24,8 @@ export CUDA_HOME=/lab/cuda/cuda-11.8
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 export NVCC_APPEND_FLAGS="-allow-unsupported-compiler"
 
+# python node_selection/behaviour_gen.py -n_cpu 20
+
 # 使用DeepSpeed启动多GPU训练，明确指定GPU设备
-deepspeed learning/dt_train.py 
+deepspeed learning/dt_train_ds.py  
+

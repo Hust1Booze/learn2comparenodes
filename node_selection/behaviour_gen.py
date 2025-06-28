@@ -109,10 +109,10 @@ if __name__ == "__main__":
 
     
     oracle = 'optimal_plunger'
-    problem = 'GISP' #'GISP'
+    problem = 'SETCOVER' #'GISP'
     data_partitions = ['train','valid'] #dont change
     n_cpu = 1
-    n_instance = 200
+    n_instance = 1000
     device = 'cpu'
     debug_model = 0
     
