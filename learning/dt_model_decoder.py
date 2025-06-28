@@ -87,21 +87,14 @@ class DTModel(nn.Module):
         
         _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
 
-        if self.use_decoder:
-            encoder_select_sequence_embd = self.encoder_select(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
-            encoder_branch_sequence_embd = self.encoder_branch(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
-            select_sequence_embd = self.decoder_select(encoder_select_sequence_embd, states_embd, tgt_key_padding_mask=select_sequence_masks, memory_key_padding_mask=states_mask)
-            branch_sequence_embd = self.decoder_branch(states_embd, encoder_branch_sequence_embd, tgt_key_padding_mask=states_mask, memory_key_padding_mask=branch_sequence_masks)
-
-        else:
-            select_sequence_embd = self.deal_select(_select_sequence_embd, select_sequence_masks, states_embd, states_mask)
-            branch_sequence_embd = self.deal_branch(_branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
+        encoder_select_sequence_embd = self.encoder_select(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
+        encoder_branch_sequence_embd = self.encoder_branch(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
+        select_sequence_embd = self.decoder_select(encoder_select_sequence_embd, states_embd, tgt_key_padding_mask=select_sequence_masks, memory_key_padding_mask=states_mask)
+        branch_sequence_embd = self.decoder_branch(states_embd, encoder_branch_sequence_embd, tgt_key_padding_mask=states_mask, memory_key_padding_mask=branch_sequence_masks)
 
         branch_logits = self.branch_head(branch_sequence_embd)
         select_logits = self.select_head(select_sequence_embd)
 
-        # print("branch_logits.shape",branch_logits.shape)
-        # print("select_logits.shape",select_logits.shape)
         # cal branch loss
         branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
         select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_labels, node_ids)
