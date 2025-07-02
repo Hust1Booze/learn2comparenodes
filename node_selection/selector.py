@@ -6,6 +6,7 @@ from pyscipopt import SCIP_EVENTTYPE,Eventhdlr,SCIP_RESULT
 from node_selectors import OracleNodeSelectorAbdel
 import torch
 import time
+import numpy as np
 
 
 class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
@@ -32,6 +33,9 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         select_node_number = select_node['selnode'].getNumber()
         if select_node_number == 1:
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, select_node['selnode'])
+
+
+            _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
             self.saver.milp_state = g
 
         leaves, children, siblings = self.model.getOpenNodes()
@@ -40,28 +44,15 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         open_nodes_number = []
         for open_node in open_nodes:
             open_nodes_number.append(open_node.getNumber())
-
-        gap = self.model.getGap()
-        LPObjVal = self.model.getLPObjVal()
-        local_estimate = self.model.getLocalEstimate()
-        obj_val = self.model.getObjVal()
-        primal_bound = self.model.getPrimalbound()
-        dualbound = self.model.getDualbound()
-        dualboundRoot = self.model.getDualboundRoot()
-
-        obj_val_gap = obj_val - local_estimate
-        obj_val_gap_ratio = obj_val_gap / obj_val
-        obj_val_gap_ratio = obj_val_gap_ratio if obj_val_gap_ratio > 0 else 0
-        obj_val_gap_ratio = obj_val_gap_ratio if obj_val_gap_ratio < 1 else 1
-        obj_val_gap_ratio = obj_val_gap_ratio if obj_val_gap_ratio > 0 else 0
         
-        data = {
-            "type" : "select",
-            "data" : [select_node_number],
-            "cand" : open_nodes_number
-        }
-
-        self.saver.squence.append(data)
+        #print(f'select node {select_node_number}')
+        if select_node_number != 1:
+            data = {
+                "type" : "select",
+                "data" : [select_node_number],
+                "cand" : open_nodes_number
+            }
+            self.saver.squence.append(data)
  
         return select_node        
         
@@ -128,14 +119,20 @@ class ScipEvent(Eventhdlr):
         if(event.getName() == 'NODEINFEASIBLE'):
             pass
         if(event.getName() == 'NODEFOCUSED'):
-            print('debug')
             pass
         if(event.getName() == 'NODEBRANCHED'):
             leaves, children, siblings = self.model.getOpenNodes()
             open_nodes = leaves + children + siblings
             open_nodes_number = []
+            open_nodes_depth = []
+            open_nodes_lb = []
+
             for open_node in open_nodes:
                 open_nodes_number.append(open_node.getNumber())
+                open_nodes_depth.append(open_node.getDepth())
+                open_nodes_lb.append(open_node.getLowerbound())
+
+            for open_node in open_nodes:
                 if open_node.getParent().getNumber() == node_number:
                     child_number = open_node.getNumber()
                     # print(f'chile node {child_number}')
@@ -152,17 +149,40 @@ class ScipEvent(Eventhdlr):
 
                     #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
                     child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]
+
                     lb = open_node.getLowerbound()
                     estimate = open_node.getEstimate()
+                    addedConss = open_node.getNAddedConss()
+                    domchg = open_node.getNDomchg()
+                    parentBranchings = open_node.getNParentBranchings()
+
+                    # print(f"Node {child_number} - lb: {lb}, estimate: {estimate}")
+                    # print(f"Node {child_number} - addedConss: {addedConss}, domchg: {domchg}, parentBranchings: {parentBranchings}")
 
                     gap = self.model.getGap()
                     LPObjVal = self.model.getLPObjVal()
                     local_estimate = self.model.getLocalEstimate()
-                    obj_val = self.model.getObjVal()
-                    primal_bound = self.model.getPrimalbound()
-                    dualbound = self.model.getDualbound()
-                    dualboundRoot = self.model.getDualboundRoot()
-                    
+
+                    # this all postive
+                    primal_bound = self.model.getPrimalbound() *-1
+                    dualbound = self.model.getDualbound()*-1
+                    dualboundRoot = self.model.getDualboundRoot()*-1
+
+                    # print(f"Model - gap: {gap}, LPObjVal: {LPObjVal}, local_estimate: {local_estimate}")
+                    # print(f"Model - primal_bound: {primal_bound}, dualbound: {dualbound}, dualboundRoot: {dualboundRoot}")
+
+                    x1 = relDistance(lb, LPObjVal)
+                    x2 = relDistance(lb, local_estimate)
+
+                    x3 = relDistance(estimate, LPObjVal)
+                    x4 = relDistance(estimate, local_estimate)
+
+                    x5 = relPosition(lb, primal_bound, dualbound)
+                    x6 = relPosition(primal_bound, estimate, lb)
+
+                    rel_depth = (np.max(open_nodes_depth) - depth) / np.max(open_nodes_depth)
+
+                    child_node = [x1, x2, x3, x4, x5, x6, rel_depth, lb/np.min(open_nodes_lb), node_number,child_number,var_idx,bbound,btype]
                     data = {
                         "type" : "node",
                         "data" : child_node,
@@ -172,3 +192,22 @@ class ScipEvent(Eventhdlr):
                     self.saver.squence.append(data)
         
 
+# static
+def relDistance(x, y):
+    """Relative distance between x and y."""
+    if x*y<0:
+        return 0.
+    else:
+        return np.abs(x-y) / np.max([np.abs(x), np.abs(y), 1e-10])
+    
+def relPosition(node_bound, ub, lb):
+    """Relative position of node_bound with respect to global upper and lower bounds (or other commensurable quantities).
+    
+    :param node_bound: float, LP bound at node
+    :param ub: float, global upper bound
+    :param lb: float, global lower bound
+    """
+    if ub == lb:
+        return 0 
+    else:
+        return np.abs(ub - node_bound) / np.abs(ub -lb)

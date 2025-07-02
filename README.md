@@ -37,3 +37,6 @@ decoder（MILP） -decoder（BNB）结构，方式来融合MILP和BNB过程 的�
 问题 ？
 
 绘图： 参考文章： Non-autoregressive Generative Models for Reranking Recommendation
+
+
+问题：连续两次branch？

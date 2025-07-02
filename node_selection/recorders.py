@@ -209,11 +209,11 @@ class CompFeaturizer():
         edge_idxs = adjacency_matrix._indices()
         edge_features =  adjacency_matrix._values().unsqueeze(1)
 
-        print(f'adjacency_matrix shape : {adjacency_matrix.shape}')    
-        print(f'cons_attributes shape : {cons_attributes.shape}')
-        print(f'edge_idxs shape : {edge_idxs.shape}')
-        print(f'edge_features shape : {edge_features.shape}')
-        print(f'var_attributes shape : {var_attributes.shape}')
+        # print(f'adjacency_matrix shape : {adjacency_matrix.shape}')    
+        # print(f'cons_attributes shape : {cons_attributes.shape}')
+        # print(f'edge_idxs shape : {edge_idxs.shape}')
+        # print(f'edge_features shape : {edge_features.shape}')
+        # print(f'var_attributes shape : {var_attributes.shape}')
         
         return var_attributes, cons_attributes, edge_idxs, edge_features
         

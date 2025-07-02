@@ -39,10 +39,10 @@ class StrongBranchingRule(sp.Branchrule):
 
     def branchexeclp(self, allowaddcons):
 
-        _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
+        # _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
         node_number = self.model.getCurrentNode().getNumber()
-        if node_number == 1 and self.use_gasse_representation:
-            self.converse_to_gasse_representation()
+        # if node_number == 1 and self.use_gasse_representation:
+        #     self.converse_to_gasse_representation()
             
 
         branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.scip.getLPBranchCands()
@@ -146,8 +146,6 @@ class StrongBranchingRule(sp.Branchrule):
 
         
         cands_indexs = []
-        current_time = time.time()
-        file_path = self.save_dir + f"/{current_time:.4f}_branch_{node_number}.pt"
         for i in range(npriocands):
             var = str(branch_cands[i])
             if var in self.var2idx:
@@ -162,9 +160,14 @@ class StrongBranchingRule(sp.Branchrule):
         if self.use_gasse_representation:
             cands_indexs = [c.getCol().getLPPos() for c in branch_cands]
 
+
+        # branch_cands[best_cand_idx].getLbGlobal()
+        # branch_cands[best_cand_idx].getLbLocal()
+        # branch_cands[best_cand_idx].getLbOriginal()
+        #print(f'branch node {node_number} on {cands_indexs[action]}')
         data = {
             "type" : "branch",
-            "data" : [cands_indexs[action]] + _row_features[cands_indexs[action]],
+            "data" : [cands_indexs[action]], 
             "branch_label" : cands_indexs[action],
             "cand" : cands_indexs
         }
@@ -172,31 +175,31 @@ class StrongBranchingRule(sp.Branchrule):
 
         return {"result": SCIP_RESULT.BRANCHED}
     
-    def converse_to_gasse_representation(self):
+    # def converse_to_gasse_representation(self):
 
-        _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
+    #     _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
 
-        g =  self.saver.milp_state
-        constraint_features, edge_indices, edge_features, variable_features = g[0],g[1],g[2],g[3]
-        for idx in range(len(edge_indices)):
-            cur_edge = [edge_indices[0,idx].item(), edge_indices[1,idx].item(), edge_features[idx].item()]
-            if cur_edge not in _edge_features:
-                print('why not in edge_features')
-                # cur_edge = [edge_indices[1:idx], edge_indices[0:idx], edge_features[idx]]
-                # if cur_edge not in _edge_features:
+    #     g =  self.saver.milp_state
+    #     constraint_features, edge_indices, edge_features, variable_features = g[0],g[1],g[2],g[3]
+    #     for idx in range(len(edge_indices)):
+    #         cur_edge = [edge_indices[0,idx].item(), edge_indices[1,idx].item(), edge_features[idx].item()]
+    #         if cur_edge not in _edge_features:
+    #             cur_edge = [edge_indices[1,idx].item(), edge_indices[0,idx].item(), edge_features[idx].item()]
+    #             if cur_edge not in _edge_features:
+    #                 print('why not in edge_features')
                     
-        # 修改表征形式为 现在gnn输入格式
-        _col_features = torch.tensor(_col_features, dtype=torch.float32)
-        _row_features = torch.tensor(_row_features, dtype=torch.float32)
-        _edge_indices = []
-        _edge_features_ = []
-        for i in range(len(_edge_features)):
-            _edge_indices.append([_edge_features[i][0], _edge_features[i][1]])
-            _edge_features_.append(_edge_features[i][2])
-        _edge_indices = torch.tensor(_edge_indices, dtype=torch.int32).transpose(0,1)
-        _edge_features_ = torch.tensor(_edge_features_, dtype=torch.float32)
+    #     # 修改表征形式为 现在gnn输入格式
+    #     _col_features = torch.tensor(_col_features, dtype=torch.float32)
+    #     _row_features = torch.tensor(_row_features, dtype=torch.float32)
+    #     _edge_indices = []
+    #     _edge_features_ = []
+    #     for i in range(len(_edge_features)):
+    #         _edge_indices.append([_edge_features[i][0], _edge_features[i][1]])
+    #         _edge_features_.append(_edge_features[i][2])
+    #     _edge_indices = torch.tensor(_edge_indices, dtype=torch.int32).transpose(0,1)
+    #     _edge_features_ = torch.tensor(_edge_features_, dtype=torch.float32)
 
-        # 重新创建元组而不是直接修改
-        self.saver.milp_state = (_row_features, _edge_indices, _edge_features_, _col_features, g[4], g[5])
+    #     # 重新创建元组而不是直接修改
+    #     self.saver.milp_state = (_row_features, _edge_indices, _edge_features_, _col_features, g[4], g[5])
 
         

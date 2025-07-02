@@ -25,8 +25,9 @@ def simple_collate_fn(batch):
     node_ids = [item[5] for item in batch]
     types = [item[6] for item in batch]
     select_labels = [item[7] for item in batch]
-    branch_labels = [item[8] for item in batch]
-    
+    branch_actions = [item[8] for item in batch]
+    branch_labels = [item[9] for item in batch]
+
     # 找到batch中的最大序列长度（只遍历一次）
     max_select_seq_len = max(len(seq) for seq in select_sequences)
     max_branch_seq_len = max(len(seq) for seq in branch_sequences)
@@ -34,6 +35,7 @@ def simple_collate_fn(batch):
     max_branch_cands = max(len(seq) for seq in branch_cands)
     max_node_id = max(len(node_id) for node_id in node_ids)
     max_type = max(len(type) for type in types)
+    max_branch_actions = max(len(action) for action in branch_actions)
 
     # 获取序列的维度信息
     if len(select_sequences) > 0 and len(select_sequences[0]) > 0:
@@ -55,10 +57,10 @@ def simple_collate_fn(batch):
     select_cand_masks = []
     branch_cand_masks = []
     node_id_masks = []
-    
+    padded_branch_actions = []
     # 只遍历一次batch，完成所有padding和mask生成
-    for seq, branch_seq, select_cand, branch_cand, node_id, type in zip(
-        select_sequences, branch_sequences, select_cands, branch_cands, node_ids, types
+    for seq, branch_seq, select_cand, branch_cand, node_id, type, branch_action in zip(
+        select_sequences, branch_sequences, select_cands, branch_cands, node_ids, types, branch_actions
     ):
         # 处理select_sequences
         seq_len = len(seq)
@@ -139,7 +141,14 @@ def simple_collate_fn(batch):
         padded_type[:type_len] = type
         padded_types.append(padded_type)
 
-    
+        # 处理branch_actions
+        branch_action_len = len(branch_action)
+        if len(branch_action.shape) > 1:
+            padded_branch_action = torch.full((max_branch_actions, branch_action.shape[1]), -1, dtype=branch_action.dtype)
+        else:
+            padded_branch_action = torch.full((max_branch_actions,), -1, dtype=branch_action.dtype)
+        padded_branch_action[:branch_action_len] = branch_action
+        padded_branch_actions.append(padded_branch_action)
     # 堆叠所有tensor
     batched_data = {
         'select_sequences': torch.stack(padded_select_sequences),
@@ -150,6 +159,7 @@ def simple_collate_fn(batch):
         'types' : torch.stack(padded_types),
         'select_labels': torch.stack(select_labels).to(torch.int64),
         'branch_labels': torch.stack(branch_labels).to(torch.int64),
+        'branch_actions': torch.stack(padded_branch_actions).to(torch.int64),
         'select_sequence_masks': torch.stack(select_sequence_masks),
         'branch_sequence_masks': torch.stack(branch_sequence_masks),
         'select_cand_masks': torch.stack(select_cand_masks),
@@ -186,9 +196,8 @@ class BnBSequentialDataset(Dataset):
                 type_data = type_data[2:]
                 
                 # 记录序列长度和对应的目录
-                if sequence_data.shape[1] == 8:#done know why ,SETCOVER的数据有的不是8列
-                    sequence_lengths.append(sequence_data.shape[0])
-                    valid_dirs.append(dir_path)
+                sequence_lengths.append(sequence_data.shape[0])
+                valid_dirs.append(dir_path)
                 
             except Exception as e:
                 print(f"处理样本 {dir_path} 时出错: {e}")
@@ -268,6 +277,9 @@ class BnBSequentialDataset(Dataset):
         cand = torch.load(dir_path / 'cand.pt')
         node_id = torch.load(dir_path / 'node_id.pt')
         branch_label = torch.load(dir_path / 'branch_label.pt')
+        branch_action = torch.load(dir_path / 'branch_action.pt')
+        select_action = torch.load(dir_path / 'select_action.pt')
+        select_label = torch.load(dir_path / 'select_label.pt')
 
         if sequence_data.shape[0]> 2000 :
             print(f"sequence_data.shape[0]> 2000: {sequence_data.shape[0]}, path: {dir_path}")
@@ -283,27 +295,20 @@ class BnBSequentialDataset(Dataset):
         type_1_indices = torch.where(type == 1)[0]  # select positions, not choose first selct
         type_2_indices = torch.where(type == 2)[0]  # branch positions
 
-        select_action = 1 
-        times = 0
-        while select_action == 1 and times < 100:
-            select_idx = random.choice(type_1_indices.tolist())
-            select_sequence = sequence_data[:select_idx]
-            select_action = sequence_data[select_idx][0]
-            times += 1
-
-        if times == 100:
-            print(f"select_idx not in node_id: {select_idx}, path: {dir_path}")
-            return None, None, None, None, None, None, None, None, None
+        select_idx = random.choice(type_1_indices.tolist())
+        select_sequence = sequence_data[:select_idx]
+        select_action = select_action[select_idx]
+        select_label = select_label[select_idx]
         
-
         branch_idx = random.choice(type_2_indices.tolist())
         branch_sequence = sequence_data[:branch_idx]
-        branch_action = branch_label[branch_idx]
+        branch_action = branch_action[:branch_idx]
+        branch_label = branch_label[branch_idx]
 
         if select_action not in node_id:
             print(f"select_idx not in node_id: {select_idx}")
 
-        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action
+        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action, branch_label
     
 
 def calculate_average_reward_static(dataset):

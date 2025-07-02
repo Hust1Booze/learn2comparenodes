@@ -59,10 +59,10 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
 
     # Run the optimizer
     model.optimize()
-
+    objval = model.getObjVal()
     sequence_saver.save()
 
-    print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time' )
+    print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time, objval:{objval}' )
     
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")
@@ -77,14 +77,9 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
 def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device,debug_model):
     
     for instance in instances:
-        print(f'dealing {instance}', flush= True)
-        try:
-            
-            run_episode(oracle_type, instance, save_dir, save_dir_svm, device,debug_model)
-            print(f'dealing  done', flush= True)
-        except:
-            print(f'error in dealing', flush= True)
-    
+        print(f'dealing {instance}', flush= True)      
+        run_episode(oracle_type, instance, save_dir, save_dir_svm, device,debug_model)
+        print(f'done {instance}\n', flush= True)  
         
     print("finished running episodes for process")
         
@@ -106,13 +101,11 @@ def distribute(n_instance, n_cpu):
 
 if __name__ == "__main__":
     
-
-    
     oracle = 'optimal_plunger'
-    problem = 'GISP' #'GISP'
+    problem = 'SETCOVER' #'GISP'
     data_partitions = ['train','valid'] #dont change
     n_cpu = 1
-    n_instance = 1000
+    n_instance = 10
     device = 'cpu'
     debug_model = 0
     

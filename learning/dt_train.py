@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward, calculate_average_reward_static, simple_collate_fn
-from dt_model import DTModel
+from dt_model_decoder import DTModel
 import time
 import gc
 import os
@@ -40,8 +40,8 @@ def train():
     model = model.to(device)
     
     # 创建数据集
-    dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train", max_samples=max_samples)
-    valid_dataset = BnBSequentialDataset(f"/data/ltf/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=max_samples)
+    dataset = BnBSequentialDataset(f"/data/ltf/bnb_gasses/learn2comparenodes/node_selection/data/{problem}/train", max_samples=max_samples)
+    valid_dataset = BnBSequentialDataset(f"/data/ltf/bnb_gasses/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=max_samples)
     
     # 创建DataLoader
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
