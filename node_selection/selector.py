@@ -46,13 +46,13 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
             open_nodes_number.append(open_node.getNumber())
         
         #print(f'select node {select_node_number}')
-        if select_node_number != 1:
-            data = {
-                "type" : "select",
-                "data" : [select_node_number],
-                "cand" : open_nodes_number
-            }
-            self.saver.squence.append(data)
+        #if select_node_number != 1:
+        data = {
+            "type" : "select",
+            "data" : [select_node_number],
+            "cand" : open_nodes_number
+        }
+        self.saver.squence.append(data)
  
         return select_node        
         

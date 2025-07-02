@@ -35,17 +35,21 @@ class SequenceSaver():
             select_label.append(-1)
             if item['type'] == 'select':
                 select_node_number = item["data"][0]
-                # find node feature, use node feature when select node
-                index = node_id.index(select_node_number)
+                if select_node_number != 1:
+                # find node feature, use node feature when select node, except for node1
+                    index = node_id.index(select_node_number)
+                    data.append(data[index])
+                else:
+                    data.append(item["data"] + [0] * (max_data_length - len(item["data"])))
+
                 select_action[-1] = select_node_number
                 select_label[-1] = select_node_number
-                data.append(data[index])
                 type.append(1)
                 cand.append(item["cand"] + [-1] * (max_cand_length - len(item["cand"])))
             elif item['type'] == 'branch':
                 if len(data)!=0 and type[-1] ==2 :
                     continue_branch = True
-                    print(f'why to continue branch on {self.save_path}')
+                    print(f'why continue branch on {self.save_path}')
                 data.append(item["data"] + [0] * (max_data_length - len(item["data"])))
                 type.append(2)
                 cand.append(item["cand"] + [-1] * (max_cand_length - len(item["cand"])))

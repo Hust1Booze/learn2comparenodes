@@ -14,8 +14,8 @@ class DTModel(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
 
-        self.encoder_layer_branch = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
-        self.encoder_layer_select = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
+        self.encoder_layer_branch = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*4, dropout=dropout, batch_first=True)
+        self.encoder_layer_select = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*4, dropout=dropout, batch_first=True)
         self.encoder_branch = nn.TransformerEncoder(self.encoder_layer_branch, num_layers=n_layers)
         self.encoder_select = nn.TransformerEncoder(self.encoder_layer_select, num_layers=n_layers)
 

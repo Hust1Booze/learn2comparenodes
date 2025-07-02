@@ -285,15 +285,19 @@ class BnBSequentialDataset(Dataset):
             print(f"sequence_data.shape[0]> 2000: {sequence_data.shape[0]}, path: {dir_path}")
         
         # 暂时这样做，不知道为什么 SETCOVER收集的数据会选择节点1三次,甚至多次
-        # sequence_data = _sequence_data[2:]
-        # type = _type[2:]
-        # cand = _cand[2:]
-        # node_id = _node_id[2:]
-        # branch_label = _branch_label[2:]
+        sequence_data = sequence_data[2:]
+        type = type[2:]
+        cand = cand[2:]
+        node_id = node_id[2:]
+        branch_label = branch_label[2:]
+        branch_action = branch_action[2:]
+        select_action = select_action[2:]
+        select_label = select_label[2:]
 
         # 找到type=1和type=0的位置
-        type_1_indices = torch.where(type == 1)[0]  # select positions, not choose first selct
-        type_2_indices = torch.where(type == 2)[0]  # branch positions
+        type_1_indices = torch.where(type == 1)[0][1:]  # select positions, not choose first selct
+
+        type_2_indices = torch.where(type == 2)[0] # branch positions
 
         select_idx = random.choice(type_1_indices.tolist())
         select_sequence = sequence_data[:select_idx]
