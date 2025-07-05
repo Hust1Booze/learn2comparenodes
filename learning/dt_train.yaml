@@ -6,4 +6,4 @@ branch_loss_weight : 1
 
 lr : 0.0005
 
-max_samples : 10
+max_samples : 1000

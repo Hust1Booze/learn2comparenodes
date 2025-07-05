@@ -17,7 +17,7 @@ from functools import partial
 def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_model):
     
     model = sp.Model()
-    model.hideOutput()
+    model.hideOutput()      
     #model.setIntParam("display/verblevel", 5)  # 设置详细程度为 5（最高）
     
     #Setting up oracle selector
@@ -29,7 +29,16 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     model.setParam('constraints/linear/upgrade/setppc', 0)
     model.setParam('constraints/linear/upgrade/xor', 0)
     model.setParam('constraints/linear/upgrade/varbound', 0)
-    
+    #model.setParam("presolving/maxrounds", 1)
+    #model.setParam('limits/restarts',0)
+    #model.setParam('limits/autorestartnodes',0)
+    #model.setParam("restarts/enabled", False)  # 禁用重启
+
+    model.setParam("presolving/maxrestarts", 0)
+
+    # for p in model.getParams():
+    #     if "restart" in p:
+    #         print(p)
     
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
 
@@ -103,9 +112,9 @@ if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
     problem = 'SETCOVER' #'GISP'
-    data_partitions = ['valid'] #dont change
-    n_cpu = 1
-    n_instance = 2
+    data_partitions = ['train','valid'] #dont change
+    n_cpu = 10
+    n_instance = 100
     device = 'cpu'
     debug_model = 0
     

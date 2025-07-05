@@ -12,7 +12,7 @@ import numpy as np
 class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
     
     def __init__(self, oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm,sequence_saver,save_dir):
-        super().__init__(oracle_type)
+        super().__init__(oracle_type, sel_policy = '')
         self.counter = 0
         self.comp_behaviour_saver = comp_behaviour_saver
         self.comp_behaviour_saver_svm = comp_behaviour_saver_svm
@@ -33,9 +33,7 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         select_node_number = select_node['selnode'].getNumber()
         if select_node_number == 1:
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, select_node['selnode'])
-
-
-            _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
+            #_col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
             self.saver.milp_state = g
 
         leaves, children, siblings = self.model.getOpenNodes()

@@ -272,27 +272,27 @@ class BnBSequentialDataset(Dataset):
         dir_path = self.trajectories[idx]
 
         state = torch.load(dir_path / 'state.pt')
-        sequence_data = torch.load(dir_path / 'data.pt')
-        type = torch.load(dir_path / 'type.pt')
-        cand = torch.load(dir_path / 'cand.pt')
-        node_id = torch.load(dir_path / 'node_id.pt')
-        branch_label = torch.load(dir_path / 'branch_label.pt')
-        branch_action = torch.load(dir_path / 'branch_action.pt')
-        select_action = torch.load(dir_path / 'select_action.pt')
-        select_label = torch.load(dir_path / 'select_label.pt')
+        _sequence_data = torch.load(dir_path / 'data.pt')
+        _type = torch.load(dir_path / 'type.pt')
+        _cand = torch.load(dir_path / 'cand.pt')
+        _node_id = torch.load(dir_path / 'node_id.pt')
+        _branch_labels = torch.load(dir_path / 'branch_label.pt')
+        _branch_actions = torch.load(dir_path / 'branch_action.pt')
+        _select_actions = torch.load(dir_path / 'select_action.pt')
+        _select_labels = torch.load(dir_path / 'select_label.pt')
 
-        if sequence_data.shape[0]> 2000 :
-            print(f"sequence_data.shape[0]> 2000: {sequence_data.shape[0]}, path: {dir_path}")
+        if _sequence_data.shape[0]> 2000 :
+            print(f"_sequence_data.shape[0]> 2000: {_sequence_data.shape[0]}, path: {dir_path}")
         
         # 暂时这样做，不知道为什么 SETCOVER收集的数据会选择节点1三次,甚至多次
-        sequence_data = sequence_data[2:]
-        type = type[2:]
-        cand = cand[2:]
-        node_id = node_id[2:]
-        branch_label = branch_label[2:]
-        branch_action = branch_action[2:]
-        select_action = select_action[2:]
-        select_label = select_label[2:]
+        sequence_data = _sequence_data
+        type = _type
+        cand = _cand
+        node_id = _node_id
+        branch_labels = _branch_labels
+        branch_actions = _branch_actions
+        select_actions = _select_actions
+        select_labels = _select_labels
 
         # 找到type=1和type=0的位置
         type_1_indices = torch.where(type == 1)[0][1:]  # select positions, not choose first selct
@@ -301,13 +301,13 @@ class BnBSequentialDataset(Dataset):
 
         select_idx = random.choice(type_1_indices.tolist())
         select_sequence = sequence_data[:select_idx]
-        select_action = select_action[select_idx]
-        select_label = select_label[select_idx]
+        select_action = select_actions[select_idx]
+        select_label = select_labels[select_idx]
         
         branch_idx = random.choice(type_2_indices.tolist())
         branch_sequence = sequence_data[:branch_idx]
-        branch_action = branch_action[:branch_idx]
-        branch_label = branch_label[branch_idx]
+        branch_action = branch_actions[:branch_idx]
+        branch_label = branch_labels[branch_idx]
 
         if select_action not in node_id:
             print(f"select_idx not in node_id: {select_idx}")
