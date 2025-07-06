@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
-from dt_model_decoder import DTModel
+from dt_model import DTModel
 import time
 import deepspeed
 import os
@@ -45,15 +45,9 @@ def train():
         }
     }
 
-    if model_engine.global_rank == 0:
-        print(f'~'*80)
-        print(f'Config:\n{config}')
-        print(f'DS Config:\n{ds_config}')
-        print(f'~'*80)
-
     model = DTModel()
-    dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/train/", max_samples=max_samples)
-    valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/batch_transformer/learn2comparenodes/node_selection/data/{problem}/valid/", max_samples=max_samples)
+    dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/bnb_gasses/learn2comparenodes/node_selection/data/{problem}/train/", max_samples=max_samples)
+    valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/bnb_gasses/learn2comparenodes/node_selection/data/{problem}/valid/", max_samples=max_samples)
     # DeepSpeed 初始化
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
@@ -67,6 +61,11 @@ def train():
     save_dir = None
 
     if model_engine.global_rank == 0:
+
+        print(f'~'*80)
+        print(f'Config:\n{config}')
+        print(f'DS Config:\n{ds_config}')
+        print(f'~'*80)
         # 创建TensorBoard writer
         current_time = datetime.datetime.now().strftime('%b%d_%H-%M')
         save_dir = f'./models/train_{current_time}'

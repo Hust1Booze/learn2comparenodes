@@ -39,4 +39,6 @@ decoder（MILP） -decoder（BNB）结构，方式来融合MILP和BNB过程 的�
 绘图： 参考文章： Non-autoregressive Generative Models for Reranking Recommendation
 
 
-问题：连续两次branch？
+问题：连续两次branch？ 已解决，presolve restart limits set to 0
+
+setcover在dual-decorder上 eval看起来像 过拟合了，但eval acc很低 只有0.0几

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -o job.%j.out
-#SBATCH --partition=l40s
+#SBATCH --partition=v100
 #SBATCH --qos=dcgpu
 #SBATCH -J data_gen_cpu              # 作业名
 #SBATCH --nodes=1                    # 申请1个节点

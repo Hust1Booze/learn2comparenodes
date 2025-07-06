@@ -219,10 +219,7 @@ class BnBSequentialDataset(Dataset):
         filtered_dirs = [valid_dirs[i] for i in range(len(valid_dirs)) if filtered_indices[i]]
         filtered_lengths = sequence_lengths[filtered_indices]
         
-        print(f"原始样本数: {len(all_dirs)}")
-        print(f"有效样本数: {len(valid_dirs)}")
-        print(f"剔除异常后样本数: {len(filtered_dirs)}")
-        print(f"剔除的样本数: {len(valid_dirs) - len(filtered_dirs)}")
+        print(f"原始样本数: {len(all_dirs)}, 有效样本数: {len(valid_dirs)}, 剔除异常后样本数: {len(filtered_dirs)}, 剔除的样本数: {len(valid_dirs) - len(filtered_dirs)}")
         
         # 输出统计信息
         stats = {
@@ -244,23 +241,17 @@ class BnBSequentialDataset(Dataset):
             }
         }
         
-        print(f"\n序列长度统计结果 (剔除异常后):")
-        print(f"总样本数: {stats['total_samples']}")
-        print(f"平均长度: {stats['mean_length']:.2f}")
-        print(f"最大长度: {stats['max_length']}")
-        print(f"最小长度: {stats['min_length']}")
-        print(f"中位数长度: {stats['median_length']:.2f}")
-        print(f"标准差: {stats['std_length']:.2f}")
-        print(f"\n长度分布:")
+        print(f"序列长度统计结果 (剔除异常后): 总样本数: {stats['total_samples']}, 平均长度: {stats['mean_length']:.2f}, 最大长度: {stats['max_length']}, 最小长度: {stats['min_length']}, 中位数长度: {stats['median_length']:.2f}, 标准差: {stats['std_length']:.2f}")
+        print(f"长度分布: ", end="")
         for range_name, count in stats['length_distribution'].items():
             percentage = (count / stats['total_samples']) * 100
-            print(f"  {range_name}: {count} 个样本 ({percentage:.1f}%)")
+            print(f"{range_name}: {count}个样本({percentage:.1f}%) ", end="")
 
         if self.max_samples is not None:
             # 随机选择指定数量的样本
             random.shuffle(filtered_dirs)
             filtered_dirs = filtered_dirs[:self.max_samples]
-            print(f"随机选择后样本数: {len(filtered_dirs)}")
+            print(f"训练使用样本数目: {len(filtered_dirs)}")
         
         return filtered_dirs
     

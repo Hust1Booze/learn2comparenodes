@@ -11,7 +11,7 @@ class DTModel(nn.Module):
         self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
         self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=0)
         self.pos_embedding = nn.Embedding(10000, d_model) # support 10000 sequence length 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout,dim_feedforward =128, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
 
         self.max_nodes = 10000
@@ -65,7 +65,7 @@ class DTModel(nn.Module):
         types = sequence_data["types"].to(device)
         select_labels = sequence_data["select_labels"]
         branch_labels = sequence_data["branch_labels"]
-
+        branch_actions = sequence_data["branch_actions"].to(device)
         select_sequence_masks = sequence_data["select_sequence_masks"].to(device)
         branch_sequence_masks = sequence_data["branch_sequence_masks"].to(device)
         select_cand_masks = sequence_data["select_cand_masks"].to(device)
@@ -73,9 +73,11 @@ class DTModel(nn.Module):
         node_id_masks = sequence_data["node_id_masks"].to(device)
 
 
+
         states_embd, states_mask = self.deal_states(states, device)
         
-        _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
+        #_select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
+        _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, states_embd, branch_actions, device)
 
         select_sequence_embd = self.transformer(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
         branch_sequence_embd = self.transformer(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
@@ -124,8 +126,50 @@ class DTModel(nn.Module):
 
         return states_emb_tensor, states_emb_masks_tensor
     
+    def combine_sequence_embd(self,select_sequences, branch_sequences, types, states_emb, branch_actions, device):
+        select_sequence_embd = self.token_proj(select_sequences)
+        branch_sequence_embd = self.token_proj(branch_sequences)
 
-    def combine_sequence_embd(self,select_sequences, branch_sequences, types, device):
+        # 替换branch_sequence_embd中branch_actions不为-1的位置
+        # branch_actions: [batch_size, seq_len] - 记录states_emb的位置
+        # states_emb: [batch_size, max_state_emb_len, d_model]
+        batch_size, branch_seq_len, d_model = branch_sequence_embd.shape
+        
+        # 创建mask，标识哪些位置需要替换
+        replace_mask = (branch_actions != -1)  # [batch_size, seq_len]
+        
+        # 替换 sequence_embd中branch的位置 为 states中var的embd
+        for batch_idx in range(batch_size):
+            for seq_idx in range(branch_seq_len):
+                if replace_mask[batch_idx, seq_idx]:
+                    state_idx = branch_actions[batch_idx, seq_idx]
+                    # 确保索引在有效范围内
+                    if state_idx < states_emb.shape[1]:
+                        branch_sequence_embd[batch_idx, seq_idx] = states_emb[batch_idx, state_idx]
+                    else:
+                        print(f'why state_idx {state_idx} out of range')
+
+        types_embd = self.type_embedding(types)
+
+        # 创建position embedding
+        batch_size, select_seq_len, _ = select_sequence_embd.shape
+        _, branch_seq_len, _ = branch_sequence_embd.shape
+        
+        # 创建position indices
+        select_positions = torch.arange(select_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        branch_positions = torch.arange(branch_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        
+        # 获取position embeddings
+        select_pos_embd = self.pos_embedding(select_positions)
+        branch_pos_embd = self.pos_embedding(branch_positions)
+
+        # 组合所有embeddings: token + type + position
+        select_sequence_embd = select_sequence_embd + types_embd[:,:select_sequence_embd.shape[1],:] + select_pos_embd
+        branch_sequence_embd = branch_sequence_embd + types_embd[:,:branch_sequence_embd.shape[1],:] + branch_pos_embd
+
+        return select_sequence_embd,branch_sequence_embd
+    
+    def combine_sequence_embd_old_version(self,select_sequences, branch_sequences, types, device):
         select_sequence_embd = self.token_proj(select_sequences)
         branch_sequence_embd = self.token_proj(branch_sequences)
 
