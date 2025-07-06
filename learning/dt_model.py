@@ -8,7 +8,7 @@ class DTModel(nn.Module):
     def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
         super().__init__()
         self.d_model = d_model  # 保存d_model参数
-        self.token_proj = nn.Linear(8, d_model)  # project all input tokens to d_model dim
+        self.token_proj = nn.Linear(13, d_model)  # project all input tokens to d_model dim
         self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=0)
         self.pos_embedding = nn.Embedding(10000, d_model) # support 10000 sequence length 
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout,dim_feedforward =128, batch_first=True)
@@ -268,7 +268,8 @@ class DTModel(nn.Module):
 
         batch_indices = torch.arange(batch_size, device=branch_logits.device)
         # labels 就表示label在cands中的位置
-        target = branch_cands[batch_indices,branch_labels]      
+        #target = branch_cands[batch_indices,branch_labels]  
+        target = branch_labels.to(branch_logits.device)     
         # 计算交叉熵损失
         loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
         

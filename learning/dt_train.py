@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dt_dataset import BnBSequentialDataset, calculate_average_reward, calculate_average_reward_static, simple_collate_fn
-from dt_model_decoder import DTModel
+from dt_model import DTModel
 import time
 import gc
 import os
