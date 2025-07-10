@@ -29,17 +29,10 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     model.setParam('constraints/linear/upgrade/setppc', 0)
     model.setParam('constraints/linear/upgrade/xor', 0)
     model.setParam('constraints/linear/upgrade/varbound', 0)
-    #model.setParam("presolving/maxrounds", 1)
-    #model.setParam('limits/restarts',0)
-    #model.setParam('limits/autorestartnodes',0)
-    #model.setParam("restarts/enabled", False)  # 禁用重启
 
-    model.setParam("presolving/maxrestarts", 0)
+    # this set to avoid SETCOVER muti restart
+    #model.setParam("presolving/maxrestarts", 0)
 
-    # for p in model.getParams():
-    #     if "restart" in p:
-    #         print(p)
-    
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
 
     save_dir = save_dir + '/' + str(instance).split("/")[-1] + f"_{int(time.time())}"
@@ -59,12 +52,12 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     scipEvent = ScipEvent(model,sequence_saver,device)
     model.includeEventhdlr(scipEvent, "ScipEvent", "Event handler when nodes are pouned")
 
-    brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=True, random_branching_prob=0)
-    model.includeBranchrule(
-    branchrule=brancher,
-    name="BNB_Brancher",
-    desc="custom BNB_Brancher",
-    priority=666666, maxdepth=-1, maxbounddist=1)
+    # brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=True, random_branching_prob=0)
+    # model.includeBranchrule(
+    # branchrule=brancher,
+    # name="BNB_Brancher",
+    # desc="custom BNB_Brancher",
+    # priority=666666, maxdepth=-1, maxbounddist=1)
 
     # Run the optimizer
     model.optimize()
@@ -111,9 +104,9 @@ def distribute(n_instance, n_cpu):
 if __name__ == "__main__":
     
     oracle = 'optimal_plunger'
-    problem = 'SETCOVER' #'GISP'
+    problem = 'GISP' #'GISP'
     data_partitions = ['train','valid'] #dont change
-    n_cpu = 10
+    n_cpu = 1
     n_instance = 100
     device = 'cpu'
     debug_model = 0

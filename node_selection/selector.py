@@ -43,8 +43,10 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         for open_node in open_nodes:
             open_nodes_number.append(open_node.getNumber())
         
-        #print(f'select node {select_node_number}')
-        #if select_node_number != 1:
+        # random select
+        if np.random.rand() < 0.1 and len(open_nodes) > 1:
+            select_node = {"selnode":open_nodes[np.random.randint(0, len(open_nodes))]}
+
         data = {
             "type" : "select",
             "data" : [select_node_number],
@@ -125,6 +127,9 @@ class ScipEvent(Eventhdlr):
             open_nodes_depth = []
             open_nodes_lb = []
 
+            branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
+            save_branch_info = False
+
             for open_node in open_nodes:
                 open_nodes_number.append(open_node.getNumber())
                 open_nodes_depth.append(open_node.getDepth())
@@ -133,6 +138,7 @@ class ScipEvent(Eventhdlr):
             for open_node in open_nodes:
                 if open_node.getParent().getNumber() == node_number:
                     child_number = open_node.getNumber()
+
                     # print(f'chile node {child_number}')
                     lb, ub = node.getLowerbound(), node.getEstimate()
                     depth = node.getDepth()
@@ -144,6 +150,30 @@ class ScipEvent(Eventhdlr):
                             var_idx = self.var2idx['t_' + str(bvar)]
                         else:
                             var_idx = self.var2idx[ '_'.join(str(bvar).split('_')[1:]) ] 
+
+                    if save_branch_info is False:
+                        cands_indexs = []
+                        for i in range(npriocands):
+                            var = str(branch_cands[i])
+                            if var in self.var2idx:
+                                _var_idx = self.var2idx[var]
+                            elif var.startswith("t_") and var[2:] in self.var2idx:
+                                _var_idx = self.var2idx[var[2:]]
+                            else:
+                                print("error in save branch_cands info")
+                            cands_indexs.append(_var_idx) 
+
+
+                        data = {
+                            "type" : "branch",
+                            "data" : [var_idx], 
+                            "branch_label" : var_idx,
+                            "cand" : cands_indexs
+                        }
+                        self.saver.squence.append(data)
+
+                        #self.bnbstates.receive_states(data)
+                        save_branch_info = True
 
                     #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
                     child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]

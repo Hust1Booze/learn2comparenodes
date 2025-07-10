@@ -38,6 +38,7 @@ class BNB_States():
         self.state_emb = None
 
         self.max_data_length = 13
+        self.max_cand_length = 500
     def receive_var2idx(self,var2idx):
         self.var2idx = var2idx
 
@@ -80,7 +81,7 @@ class BNB_States():
             self.type.append(1)
             self.cand.append(item["cand"] + [-1] * (self.max_cand_length - len(item["cand"])))
         elif item['type'] == 'branch':
-            if len(self.data)!=0 and type[-1] ==2 :
+            if len(self.data)!=0 and self.type[-1] ==2 :
                 continue_branch = True
                 print(f'why continue branch')
             self.data.append(item["data"] + [0] * (self.max_data_length - len(item["data"])))
@@ -90,7 +91,7 @@ class BNB_States():
             self.branch_action[-1] = item["data"][0]
         elif item['type'] == 'node':
             self.data.append(item["data"] + [0] * (self.max_data_length - len(item["data"])))
-            type.append(3)
+            self.type.append(3)
             self.cand.append([-1] * self.max_cand_length)
             self.node_id[-1] = item["node_number"]
 
@@ -143,12 +144,12 @@ class BNB_Node_Selector(Nodesel):
             self.bnbstates.receive_origin_milp(g)
             node = self.model.getBestboundNode()
         
-        if self.default_selector :
+        if self.default_selector or len(open_nodes)<=1:
             node = self.model.getBestNode()
         else:
-            rank_node_ids = self.comb_model.get_select_node_decision(*self.bnbstates.get_dt_input())
+            sorted_node_ids = self.comb_model.get_select_node_decision(*self.bnbstates.get_dt_input())
             node = None
-            for node_id in rank_node_ids:
+            for node_id in sorted_node_ids:
                 for _node in open_nodes:
                     if _node.getNumber() == node_id:
                         node = _node
@@ -300,6 +301,9 @@ class BNB_State_Trigger(Eventhdlr):
             open_nodes_depth = []
             open_nodes_lb = []
 
+            branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
+            save_branch_info = False
+
             for open_node in open_nodes:
                 open_nodes_number.append(open_node.getNumber())
                 open_nodes_depth.append(open_node.getDepth())
@@ -307,8 +311,10 @@ class BNB_State_Trigger(Eventhdlr):
 
             for open_node in open_nodes:
                 if open_node.getParent().getNumber() == node_number:
-                    child_number = open_node.getNumber()
+                    child_number = open_node.getNumber()               
                     # print(f'chile node {child_number}')
+
+
                     lb, ub = node.getLowerbound(), node.getEstimate()
                     depth = node.getDepth()
                     bvars, bbounds, btypes = open_node.getParentBranchings()
@@ -319,6 +325,28 @@ class BNB_State_Trigger(Eventhdlr):
                             var_idx = self.var2idx['t_' + str(bvar)]
                         else:
                             var_idx = self.var2idx[ '_'.join(str(bvar).split('_')[1:]) ] 
+
+                    if save_branch_info is False:
+                        cands_indexs = []
+                        for i in range(npriocands):
+                            var = str(branch_cands[i])
+                            if var in self.var2idx:
+                                _var_idx = self.var2idx[var]
+                            elif var.startswith("t_") and var[2:] in self.var2idx:
+                                _var_idx = self.var2idx[var[2:]]
+                            else:
+                                print("error in save branch_cands info")
+                            cands_indexs.append(_var_idx) 
+
+
+                        data = {
+                            "type" : "branch",
+                            "data" : [var_idx], 
+                            "branch_label" : var_idx,
+                            "cand" : cands_indexs
+                        }
+                        self.bnbstates.receive_states(data)
+                        save_branch_info = True
 
                     #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
                     child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]
