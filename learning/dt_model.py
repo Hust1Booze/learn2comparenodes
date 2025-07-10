@@ -381,7 +381,7 @@ class DTModel(nn.Module):
 
     def get_select_node_decision(self, state_embd, sequence_tensor, types, node_id):
         with torch.no_grad():  # 用于推理但不训练
-            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
+            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
             sequence_embd = self.transformer(sequence_embd.unsqueeze(0))
             select_logits = self.deal_select(sequence_embd.unsqueeze(0), None, state_embd.unsqueeze(0), None)
 
@@ -394,7 +394,7 @@ class DTModel(nn.Module):
     def get_branch_var_decision(self, state_embd, sequence_tensor, types, node_id):
 
         with torch.no_grad():  # 用于推理但不训练
-            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
+            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
             sequence_embd = self.transformer(sequence_embd)
             branch_logits = self.deal_branch(sequence_embd, None, state_embd.unsqueeze(0), None)
 
