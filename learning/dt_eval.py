@@ -67,7 +67,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     bnbstates = BNB_States(comb_model, device)
     selector = BNB_Node_Selector(comb_model, bnbstates, device, comp_behaviour_saver)    
     selector.set_LP_feature_recorder(LPFeatureRecorder(model, device))
-    selector.setOptsol(optsol)
+    #selector.setOptsol(optsol)
     state_trigger = BNB_State_Trigger(model,bnbstates,save_dir,device)
     brancher = BNB_Brancher(comb_model, bnbstates, device)
 

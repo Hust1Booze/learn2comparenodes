@@ -70,3 +70,5 @@ pyscipopt_back/
 *.whl
 
 logs/
+
+tmp/

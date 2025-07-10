@@ -20,10 +20,16 @@ from recorders_debug import LPFeatureRecorder,CompFeaturizer
 
 # this class use to save Branch and bound sequence states, and output dt models input
 class BNB_States():
-    def __init__(self, comb_model, device): #for gisp avg_reward = 70
+    def __init__(self, comb_model, device): 
+
         self.data = []
         self.type = []
+        self.cand = []
         self.node_id = []
+        self.branch_label = []
+        self.branch_action = []
+        self.select_action = []
+        self.select_label = []
 
         self.comb_model  = comb_model
         self.device = device
@@ -31,7 +37,7 @@ class BNB_States():
         self.var2idx = None
         self.state_emb = None
 
-        self.max_data_length = 8
+        self.max_data_length = 13
     def receive_var2idx(self,var2idx):
         self.var2idx = var2idx
 
@@ -42,27 +48,55 @@ class BNB_States():
         self.state_embedded = True
 
     def get_dt_input(self):
-        sequence_tensor = torch.tensor(self.data, dtype=torch.float32) 
-        type = torch.tensor(self.type, dtype=torch.int64)
-        node_id = torch.tensor(self.node_id, dtype=torch.int64)
 
-        return self.state_emb, sequence_tensor, type, node_id
+        data_tensor = torch.tensor(self.data, dtype=torch.float32)
+        type_tensor = torch.tensor(self.type, dtype=torch.int64)
+        cand_tensor = torch.tensor(self.cand, dtype=torch.int64)
+        node_id_tensor = torch.tensor(self.node_id, dtype=torch.int64)
+        branch_label_tensor = torch.tensor(self.branch_label, dtype=torch.int64)
+        branch_action_tensor = torch.tensor(self.branch_action, dtype=torch.int64)
+        select_action_tensor = torch.tensor(self.select_action, dtype=torch.int64)
+        select_label_tensor = torch.tensor(self.select_label, dtype=torch.int64)
+
+        return self.state_emb, data_tensor, type_tensor, cand_tensor,node_id_tensor,branch_label_tensor,branch_action_tensor,select_action_tensor,select_label_tensor
 
     def receive_states(self, item):
         self.node_id.append(-1)
+        self.branch_label.append(-1)
+        self.branch_action.append(-1)
+        self.select_action.append(-1)
+        self.select_label.append(-1)
         if item['type'] == 'select':
-            self.data.append(item["data"] + [0] * (self.max_data_length - len(item["data"])))
+            select_node_number = item["data"][0]
+            if select_node_number != 1:
+            # find node feature, use node feature when select node, except for node1
+                index = self.node_id.index(select_node_number)
+                self.data.append(self.data[index])
+            else:
+                self.data.append(item["data"] + [0] * (self.max_data_length - len(item["data"])))
+
+            self.select_action[-1] = select_node_number
+            self.select_label[-1] = select_node_number
             self.type.append(1)
+            self.cand.append(item["cand"] + [-1] * (self.max_cand_length - len(item["cand"])))
         elif item['type'] == 'branch':
+            if len(self.data)!=0 and type[-1] ==2 :
+                continue_branch = True
+                print(f'why continue branch')
             self.data.append(item["data"] + [0] * (self.max_data_length - len(item["data"])))
             self.type.append(2)
+            self.cand.append(item["cand"] + [-1] * (self.max_cand_length - len(item["cand"])))
+            self.branch_label[-1] = item["branch_label"]
+            self.branch_action[-1] = item["data"][0]
         elif item['type'] == 'node':
             self.data.append(item["data"] + [0] * (self.max_data_length - len(item["data"])))
-            self.type.append(3)
+            type.append(3)
+            self.cand.append([-1] * self.max_cand_length)
             self.node_id[-1] = item["node_number"]
 
 
-# Depth First Search Node Selector
+
+
 class BNB_Node_Selector(Nodesel):
     def __init__(self, comb_model, bnbstates, device, comp_behaviour_saver):
         self.comb_model = comb_model
@@ -135,69 +169,70 @@ class BNB_Node_Selector(Nodesel):
             "data" : [select_node_number],
             "cand" : open_nodes_number
         }
+
         self.bnbstates.receive_states(data)
         return {"selnode": node}
     
-    def nodecomp(self, node1, node2, return_type=False):
+    # def nodecomp(self, node1, node2, return_type=False):
         
-        self.comp_counter += 1
+    #     self.comp_counter += 1
         
-        if self.oracle_type == "optimal_plunger":            
+    #     if self.oracle_type == "optimal_plunger":            
         
-            d1 = self.is_sol_in_domaine(self.optsol, node1)
-            d2 = self.is_sol_in_domaine(self.optsol, node2)
-            inv = np.random.rand() < self.inv_proba
+    #         d1 = self.is_sol_in_domaine(self.optsol, node1)
+    #         d2 = self.is_sol_in_domaine(self.optsol, node2)
+    #         inv = np.random.rand() < self.inv_proba
             
-            if d1 and d2:
-                res, comp_type = self.dfs_nodecomp(node1, node2), 0
-            elif d1:
-                res = comp_type = -1
-                self.inf_counter += 1
+    #         if d1 and d2:
+    #             res, comp_type = self.dfs_nodecomp(node1, node2), 0
+    #         elif d1:
+    #             res = comp_type = -1
+    #             self.inf_counter += 1
                 
             
-            elif d2:
-                res = comp_type = 1
-                self.inf_counter += 1
+    #         elif d2:
+    #             res = comp_type = 1
+    #             self.inf_counter += 1
             
-            else:
-                res, comp_type = self.estimate_nodecomp(node1, node2), 10              
+    #         else:
+    #             res, comp_type = self.estimate_nodecomp(node1, node2), 10              
             
-            inv_res = -1 if res == 1 else 1
-            res = inv_res if inv else res
+    #         inv_res = -1 if res == 1 else 1
+    #         res = inv_res if inv else res
             
-            return res if not return_type  else  (res, comp_type)
-        else:
-            raise NotImplementedError
+    #         return res if not return_type  else  (res, comp_type)
+    #     else:
+    #         raise NotImplementedError
 
     
-    def is_sol_in_domaine(self, sol, node):
-        #By partionionning, it is sufficient to only check what variable have
-        #been branched and if sol is in [lb, up]_v for v a branched variable
+    # def is_sol_in_domaine(self, sol, node):
+    #     #By partionionning, it is sufficient to only check what variable have
+    #     #been branched and if sol is in [lb, up]_v for v a branched variable
         
-        #By partionionning, it is sufficient to only check what variable have
-        #been branched and if sol is in [lb, up]_v for v a branched variable
-        branches = [[], [], []]  # 分别存 bvar, bound, btype
+    #     #By partionionning, it is sufficient to only check what variable have
+    #     #been branched and if sol is in [lb, up]_v for v a branched variable
+    #     branches = [[], [], []]  # 分别存 bvar, bound, btype
 
-        while node.getParent() is not None:
-            bvars, bounds, btypes = node.getParentBranchings()
-            branches[0] += bvars
-            branches[1] += bounds
-            branches[2] += btypes
-            node = node.getParent()
+    #     while node.getParent() is not None:
+    #         bvars, bounds, btypes = node.getParentBranchings()
+    #         branches[0] += bvars
+    #         branches[1] += bounds
+    #         branches[2] += btypes
+    #         node = node.getParent()
         
-        for bvar, bbound, btype in zip(*branches): 
-            if btype == 0:#LOWER BOUND
-                if sol[bvar] < bbound:
-                    return False
-            else: #btype==1:#UPPER BOUND
-                if sol[bvar] > bbound:
-                    return False
+    #     for bvar, bbound, btype in zip(*branches): 
+    #         if btype == 0:#LOWER BOUND
+    #             if sol[bvar] < bbound:
+    #                 return False
+    #         else: #btype==1:#UPPER BOUND
+    #             if sol[bvar] > bbound:
+    #                 return False
         
-        return True
+    #     return True
             
             
-    def setOptsol(self, optsol):
-        self.optsol = optsol
+    # def setOptsol(self, optsol):
+    #     self.optsol = optsol
 
 
         
@@ -261,17 +296,19 @@ class BNB_State_Trigger(Eventhdlr):
         if(event.getName() == 'NODEBRANCHED'):
             leaves, children, siblings = self.model.getOpenNodes()
             open_nodes = leaves + children + siblings
-            branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
-
-            save_branch_info = False
-
             open_nodes_number = []
+            open_nodes_depth = []
+            open_nodes_lb = []
+
             for open_node in open_nodes:
                 open_nodes_number.append(open_node.getNumber())
+                open_nodes_depth.append(open_node.getDepth())
+                open_nodes_lb.append(open_node.getLowerbound())
+
+            for open_node in open_nodes:
                 if open_node.getParent().getNumber() == node_number:
                     child_number = open_node.getNumber()
-                    if self.debug:
-                        print(f'chile node {child_number}')
+                    # print(f'chile node {child_number}')
                     lb, ub = node.getLowerbound(), node.getEstimate()
                     depth = node.getDepth()
                     bvars, bbounds, btypes = open_node.getParentBranchings()
@@ -282,39 +319,43 @@ class BNB_State_Trigger(Eventhdlr):
                             var_idx = self.var2idx['t_' + str(bvar)]
                         else:
                             var_idx = self.var2idx[ '_'.join(str(bvar).split('_')[1:]) ] 
-                    
-                    if save_branch_info is False:
-                        cands_indexs = []
-                        current_time = time.time()
-                        file_path = self.save_dir + f"/{current_time:.4f}_branchinfo_{node_number}.pt"
-                        for i in range(npriocands):
-                            var = str(branch_cands[i])
-                            if var in self.var2idx:
-                                _var_idx = self.var2idx[var]
-                            elif var.startswith("t_") and var[2:] in self.var2idx:
-                                _var_idx = self.var2idx[var[2:]]
-                            else:
-                                print("error in save branch_cands info")
-                            cands_indexs.append(_var_idx) 
-                        info = {
-                            "candidate_indices": cands_indexs,
-                            "selected_var_index": var_idx
-                        }
 
-                        data = {
-                            "type" : "branch",
-                            "data" : [var_idx],
-                            "cand" : cands_indexs,
-                        }
-
-                        self.bnbstates.receive_states(data)
-                        #torch.save(info, file_path)
-                        print(f'from states : branch on the node {node_number} and  var {bvar}')
-                        #print(f'from states : branch on the node {node_number} and  var {bvar} and candidates {branch_cands}')
-                        
-                        save_branch_info = True
-
+                    #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
                     child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]
+
+                    lb = open_node.getLowerbound()
+                    estimate = open_node.getEstimate()
+                    addedConss = open_node.getNAddedConss()
+                    domchg = open_node.getNDomchg()
+                    parentBranchings = open_node.getNParentBranchings()
+
+                    # print(f"Node {child_number} - lb: {lb}, estimate: {estimate}")
+                    # print(f"Node {child_number} - addedConss: {addedConss}, domchg: {domchg}, parentBranchings: {parentBranchings}")
+
+                    gap = self.model.getGap()
+                    LPObjVal = self.model.getLPObjVal()
+                    local_estimate = self.model.getLocalEstimate()
+
+                    # this all postive
+                    primal_bound = self.model.getPrimalbound() *-1
+                    dualbound = self.model.getDualbound()*-1
+                    dualboundRoot = self.model.getDualboundRoot()*-1
+
+                    # print(f"Model - gap: {gap}, LPObjVal: {LPObjVal}, local_estimate: {local_estimate}")
+                    # print(f"Model - primal_bound: {primal_bound}, dualbound: {dualbound}, dualboundRoot: {dualboundRoot}")
+
+                    x1 = relDistance(lb, LPObjVal)
+                    x2 = relDistance(lb, local_estimate)
+
+                    x3 = relDistance(estimate, LPObjVal)
+                    x4 = relDistance(estimate, local_estimate)
+
+                    x5 = relPosition(lb, primal_bound, dualbound)
+                    x6 = relPosition(primal_bound, estimate, lb)
+
+                    rel_depth = (np.max(open_nodes_depth) - depth) / np.max(open_nodes_depth)
+
+                    child_node = [x1, x2, x3, x4, x5, x6, rel_depth, lb/np.min(open_nodes_lb), node_number,child_number,var_idx,bbound,btype]
                     data = {
                         "type" : "node",
                         "data" : child_node,
@@ -444,4 +485,32 @@ class BNB_Brancher(sp.Branchrule):
         self.model.branchVar(best_var)
         result = SCIP_RESULT.BRANCHED
 
+        data = {
+            "type" : "branch",
+            "data" : [cands_indexs[select_branch_var_idx]], 
+            "branch_label" : cands_indexs[select_branch_var_idx],
+            "cand" : cands_indexs
+        }
+        self.bnbstates.receive_states(data)
+        
         return {'result': result}
+    
+# static
+def relDistance(x, y):
+    """Relative distance between x and y."""
+    if x*y<0:
+        return 0.
+    else:
+        return np.abs(x-y) / np.max([np.abs(x), np.abs(y), 1e-10])
+    
+def relPosition(node_bound, ub, lb):
+    """Relative position of node_bound with respect to global upper and lower bounds (or other commensurable quantities).
+    
+    :param node_bound: float, LP bound at node
+    :param ub: float, global upper bound
+    :param lb: float, global lower bound
+    """
+    if ub == lb:
+        return 0 
+    else:
+        return np.abs(ub - node_bound) / np.abs(ub -lb)

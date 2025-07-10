@@ -380,9 +380,14 @@ class DTModel(nn.Module):
         return attended_output, attention_weights
 
     def get_select_node_decision(self, state_embd, sequence_tensor, types, node_id):
-        sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
-        sequence_embd = self.transformer(sequence_embd.unsqueeze(0))
-        select_logits = self.deal_select(sequence_embd.unsqueeze(0), None, state_embd.unsqueeze(0), None)
+        with torch.no_grad():  # 用于推理但不训练
+            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
+            sequence_embd = self.transformer(sequence_embd.unsqueeze(0))
+            select_logits = self.deal_select(sequence_embd.unsqueeze(0), None, state_embd.unsqueeze(0), None)
+
+            select_logits = select_logits.squeeze(-1)
+            mask = node_id == -1
+            select_logits = select_logits.masked_fill(mask, float('-inf'))
 
         return select_logits
         
@@ -395,23 +400,11 @@ class DTModel(nn.Module):
 
         return branch_logits
 
-    def get_inference_sequence_embd(self, sequence_tensor, types, node_id):
+    def get_inference_sequence_embd(self,states_embd, sequence_tensor, type_tensor, cand_tensor,node_id_tensor,branch_label_tensor,\
+                                    branch_action_tensor,select_action_tensor,select_label_tensor,device):
 
-        ######### step 1 merge input embd ############
-        sequence_embd = self.token_proj(sequence_tensor)
+        sequence_embd = self.combine_sequence_embd(sequence_tensor, type_tensor, states_embd, branch_action_tensor, device)
 
-        types_embd = self.type_embedding(types)
-
-        seq_len, _ = sequence_embd.shape
-        
-        # 创建position indices
-        positions = torch.arange(seq_len, device=sequence_embd.device).unsqueeze(0)
-        
-        # 获取position embeddings
-        pos_embd = self.pos_embedding(positions)
-
-        # 组合所有embeddings: token + type + position
-        sequence_embd = sequence_embd + types_embd + pos_embd
 
         return sequence_embd
 
