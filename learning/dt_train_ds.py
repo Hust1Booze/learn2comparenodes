@@ -58,6 +58,7 @@ def train():
     # 只在主进程创建TensorBoard writer
     writer = None
     best_branch_top1 = 0.0  # 用于跟踪最佳branch_top1
+    best_select_top1 = 0.0  # 用于跟踪最佳select_top1
     save_dir = None
 
     if model_engine.global_rank == 0:
@@ -202,12 +203,11 @@ def train():
                     writer.add_scalar('Valid_Accuracy/Branch_Top10', avg_valid_branch_top10, epoch)
 
             #检查是否需要保存模型
-            if avg_valid_branch_top1 > best_branch_top1 and save_dir is not None:
-                best_branch_top1 = avg_valid_branch_top1    
-                best_branch_top1 = avg_valid_branch_top1    
-                model_path = os.path.join(save_dir, f'best_model-{epoch}.pt')
+            if avg_valid_select_top1 > best_select_top1 and save_dir is not None:
+                best_select_top1 = avg_valid_select_top1    
+                model_path = os.path.join(save_dir, f'best_select_model-{epoch}.pt')
                 torch.save(model_engine.module.state_dict(), model_path)
-                print(f"保存最佳模型 (epoch {epoch}, branch_top1: {avg_valid_branch_top1:.4f}) 到: {model_path}")
+                print(f"保存最佳模型 (epoch {epoch}, select_top1: {avg_valid_select_top1:.4f}) 到: {model_path}")
 
     # 关闭TensorBoard writer（只在主进程）
     if model_engine.global_rank == 0 and writer is not None:

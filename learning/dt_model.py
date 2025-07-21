@@ -382,7 +382,7 @@ class DTModel(nn.Module):
     def get_select_node_decision(self, states_embd, sequence_tensor, type_tensor, cand_tensor,node_id_tensor,branch_label_tensor,\
                                     branch_action_tensor,select_action_tensor,select_label_tensor):
         with torch.no_grad():  # 用于推理但不训练
-            sequence_embd = self.get_inference_sequence_embd(states_embd, sequence_tensor, type_tensor, branch_action_tensor, sequence_tensor.device)
+            sequence_embd,_ = self.get_inference_sequence_embd(states_embd, sequence_tensor, type_tensor, branch_action_tensor, sequence_tensor.device)
             sequence_embd = self.transformer(sequence_embd)
             select_logits = self.deal_select(sequence_embd, None, states_embd.unsqueeze(0), None)
 
@@ -391,7 +391,7 @@ class DTModel(nn.Module):
             select_logits = select_logits.masked_fill(mask, float('-inf'))
             
             # 根据select_logits的大小对node_id_tensor排序（从大到小）
-            sorted_indices = torch.argsort(select_logits, descending=True)
+            sorted_indices = torch.argsort(select_logits, descending=False)
             sorted_node_ids = node_id_tensor[sorted_indices]
 
             # 将tensor转换为list
@@ -402,7 +402,7 @@ class DTModel(nn.Module):
     def get_branch_var_decision(self, state_embd, sequence_tensor, types, node_id):
 
         with torch.no_grad():  # 用于推理但不训练
-            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
+            _, sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
             sequence_embd = self.transformer(sequence_embd)
             branch_logits = self.deal_branch(sequence_embd, None, state_embd.unsqueeze(0), None)
 
@@ -410,9 +410,9 @@ class DTModel(nn.Module):
 
     def get_inference_sequence_embd(self,states_embd, sequence_tensor, type_tensor, branch_action_tensor,device):
 
-        _, sequence_embd = self.combine_sequence_embd(sequence_tensor.unsqueeze(0), sequence_tensor.unsqueeze(0), type_tensor.unsqueeze(0), states_embd.unsqueeze(0), branch_action_tensor.unsqueeze(0), device)
+        select_sequence_embd, branch_sequence_embd = self.combine_sequence_embd(sequence_tensor.unsqueeze(0), sequence_tensor.unsqueeze(0), type_tensor.unsqueeze(0), states_embd.unsqueeze(0), branch_action_tensor.unsqueeze(0), device)
 
-        return sequence_embd
+        return select_sequence_embd,branch_sequence_embd
 
     def print_model_info(self):
         """

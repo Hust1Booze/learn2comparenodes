@@ -134,12 +134,8 @@ class BNB_Node_Selector(Nodesel):
         nodes = sorted(list(filter(lambda x: x.getNumber() not in self.added_ids, open_nodes)), key=lambda node: node.getNumber())
 
         if len(open_nodes)==0:
-            if self.debug :
-                print("no open nodes", len(open_nodes))
             node = self.model.getBestboundNode()
         if len(open_nodes)==1 and self.step<3:
-            if self.debug:
-                print("root nodes", len(open_nodes))
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, nodes[0])
             self.bnbstates.receive_origin_milp(g)
             node = self.model.getBestboundNode()
@@ -158,7 +154,7 @@ class BNB_Node_Selector(Nodesel):
                     break  # 找到就退出外层循环
         
         if node is None:
-            print("dumb selection")
+            #print("dumb selection")
             return {"selnode": node}
 
         select_node_number = node.getNumber()
@@ -174,67 +170,6 @@ class BNB_Node_Selector(Nodesel):
         self.bnbstates.receive_states(data)
         return {"selnode": node}
     
-    # def nodecomp(self, node1, node2, return_type=False):
-        
-    #     self.comp_counter += 1
-        
-    #     if self.oracle_type == "optimal_plunger":            
-        
-    #         d1 = self.is_sol_in_domaine(self.optsol, node1)
-    #         d2 = self.is_sol_in_domaine(self.optsol, node2)
-    #         inv = np.random.rand() < self.inv_proba
-            
-    #         if d1 and d2:
-    #             res, comp_type = self.dfs_nodecomp(node1, node2), 0
-    #         elif d1:
-    #             res = comp_type = -1
-    #             self.inf_counter += 1
-                
-            
-    #         elif d2:
-    #             res = comp_type = 1
-    #             self.inf_counter += 1
-            
-    #         else:
-    #             res, comp_type = self.estimate_nodecomp(node1, node2), 10              
-            
-    #         inv_res = -1 if res == 1 else 1
-    #         res = inv_res if inv else res
-            
-    #         return res if not return_type  else  (res, comp_type)
-    #     else:
-    #         raise NotImplementedError
-
-    
-    # def is_sol_in_domaine(self, sol, node):
-    #     #By partionionning, it is sufficient to only check what variable have
-    #     #been branched and if sol is in [lb, up]_v for v a branched variable
-        
-    #     #By partionionning, it is sufficient to only check what variable have
-    #     #been branched and if sol is in [lb, up]_v for v a branched variable
-    #     branches = [[], [], []]  # 分别存 bvar, bound, btype
-
-    #     while node.getParent() is not None:
-    #         bvars, bounds, btypes = node.getParentBranchings()
-    #         branches[0] += bvars
-    #         branches[1] += bounds
-    #         branches[2] += btypes
-    #         node = node.getParent()
-        
-    #     for bvar, bbound, btype in zip(*branches): 
-    #         if btype == 0:#LOWER BOUND
-    #             if sol[bvar] < bbound:
-    #                 return False
-    #         else: #btype==1:#UPPER BOUND
-    #             if sol[bvar] > bbound:
-    #                 return False
-        
-    #     return True
-            
-            
-    # def setOptsol(self, optsol):
-    #     self.optsol = optsol
-
 
         
 class BNB_State_Trigger(Eventhdlr):
@@ -276,13 +211,13 @@ class BNB_State_Trigger(Eventhdlr):
         node = self.model.getCurrentNode()
         node_number = node.getNumber()
         if self.debug:
-            print(f"Node: {node_number} , {event.getName()}")
+            #print(f"Node: {node_number} , {event.getName()}")
             primalbound = self.model.getPrimalbound()
             dualbound = self.model.getDualbound()
             if primalbound != self.primalbound or dualbound != self.dualbound:
                 self.primalbound = primalbound 
                 self.dualbound = dualbound
-                print(f'primalbound : {primalbound}, dualbound : {dualbound} ')
+                #print(f'primalbound : {primalbound}, dualbound : {dualbound} ')
 
         if(event.getName() == 'BESTSOLFOUND'):
             pass

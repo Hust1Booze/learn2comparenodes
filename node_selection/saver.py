@@ -35,6 +35,7 @@ class SequenceSaver():
             select_label.append(-1)
             if item['type'] == 'select':
                 select_node_number = item["data"][0]
+                label_node_number = item["label"][0]
                 if select_node_number != 1:
                 # find node feature, use node feature when select node, except for node1
                     index = node_id.index(select_node_number)
@@ -43,7 +44,7 @@ class SequenceSaver():
                     data.append(item["data"] + [0] * (max_data_length - len(item["data"])))
 
                 select_action[-1] = select_node_number
-                select_label[-1] = select_node_number
+                select_label[-1] = label_node_number
                 type.append(1)
                 cand.append(item["cand"] + [-1] * (max_cand_length - len(item["cand"])))
             elif item['type'] == 'branch':

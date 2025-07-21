@@ -313,6 +313,14 @@ def PY_SCIP_CALL(SCIP_RETCODE rc):
     else:
         raise Exception('SCIP: unknown return code!')
 
+cdef extern from "scip/scip_nodesel.h":
+    SCIP_NODESEL* SCIPfindNodesel(SCIP* scip, const char* name)
+    
+    SCIP_RETCODE SCIPsetNodeselMemsavePriority(SCIP* scip, SCIP_NODESEL* nodesel, int priority)
+    SCIP_RETCODE SCIPsetNodeselStdPriority(SCIP* scip, SCIP_NODESEL* nodesel, int priority)
+
+
+
 cdef class Event:
     """Base class holding a pointer to corresponding SCIP_EVENT."""
 
@@ -4163,6 +4171,19 @@ cdef class Model:
 
         """
         return Node.create(SCIPgetBestLeaf(self._scip))
+
+    def setNodeselPriority(self, str nodesel_name, int priority):
+        """Sets the nodesel priority
+     
+        :param str nodesel_name:  node selector to change priority of
+        :param int priority: the new priority
+        """
+        
+        cdef SCIP_NODESEL* scip_nodesel = SCIPfindNodesel(self._scip, nodesel_name.encode("UTF-8") )
+        
+        #PY_SCIP_CALL(SCIPsetNodeselMemsavePriority(self._scip, scip_nodesel, priority))
+        PY_SCIP_CALL(SCIPsetNodeselStdPriority(self._scip, scip_nodesel, priority))
+        
 
     def getBestNode(self):
         """Gets the best node from the tree (child, sibling, or leaf) w.r.t. the node selection strategy.

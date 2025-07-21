@@ -1,5 +1,5 @@
 batch_size : 16
-problem : "GISP"
+problem : "GISP_random10"
 
 select_loss_weight : 1
 branch_loss_weight : 0.0

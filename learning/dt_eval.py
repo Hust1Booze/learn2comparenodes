@@ -46,6 +46,9 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     #Setting up oracle selector
     instance = str(instance)
     model.readProblem(instance)
+
+    model.setIntParam('randomization/permutationseed', 9)
+    model.setIntParam('randomization/randomseedshift',9)
     model.setParam('constraints/linear/upgrade/logicor',0)
     model.setParam('constraints/linear/upgrade/indicator',0)
     model.setParam('constraints/linear/upgrade/knapsack', 0)
@@ -59,7 +62,9 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     save_dir = save_dir + str(instance).split("/")[-1]
 
     comb_model = DTModel()
-    comb_model.load_state_dict(torch.load("models/best_model_2025-06-26_12-55-29.pth"))
+    #comb_model.load_state_dict(torch.load("models/train_Jul13_14-43/best_select_model-2300.pt"))
+    state_dict = torch.load('models/train_Jul14_11-15/best_select_model-13300.pt', map_location=torch.device('cpu'))
+    comb_model.load_state_dict(state_dict)
     comb_model.eval()
 
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
@@ -86,22 +91,26 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     elif debug_model ==4: #do nothing
         brancher.default_brancher = True 
         selector.default_selector = True
-
+        nsel_name = 'estimate'
+        priority = 999999
+        model.setNodeselPriority(nsel_name, priority)
+        
     # model.includeBranchrule(
     #     branchrule=brancher,
     #     name="BNB_Brancher",
     #     desc="custom BNB_Brancher",
     #     priority=666666, maxdepth=-1, maxbounddist=1)
-    model.includeNodesel(selector, "BNB_Node_Selector", "custrom node selector",
-                        536870911,  536870911)
-    model.includeEventhdlr(state_trigger, "state_trigger", "Event handler when nodes are pouned")  
+    if debug_model != 4:
+        model.includeNodesel(selector, "BNB_Node_Selector", "custrom node selector",
+                            536870911,  536870911)
+        model.includeEventhdlr(state_trigger, "state_trigger", "Event handler when nodes are pouned")  
     # Run the optimizer
     model.optimize()
 
     # if brancher.debug == True:
     #     branch_correct_rate = brancher.branch_correct/ brancher.step
     #     print(f"Brancher correct rate : {branch_correct_rate} for " + str(instance).split("/")[-1])
-    print(f"Got behaviour for instance with debug_model: {debug_model}  "+ str(instance).split("/")[-1])
+    print(f"Got behaviour for instance with debug_model: {debug_model}  "+ str(instance).split("/")[-1]+ f' {model.getNNodes()} nodes, {model.getSolvingTime()} time')
     
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")
@@ -144,7 +153,14 @@ if __name__ == "__main__":
     n_cpu = 1
     n_instance = -1
     device = 'cpu'
-    debug_model = 3 # 0 : no_debug; 1: dt; 2:selector_only; 3:brancher_only; 4:no decisions
+    debug_model = 2 # 0 : no_debug; 1: dt; 2:selector_only; 3:brancher_only; 4:no decisions
+
+
+    # 设置随机种子           
+    seed = 1
+    torch.manual_seed(seed)                # 设置 PyTorch 的全局随机种子
+    torch.cuda.manual_seed(seed)          # 设置 GPU 上的随机种子
+    np.random.seed(seed)                  # 设置 NumPy 的随机种子
 
     with open("nnodes.csv", "w") as f:
         f.write("")
@@ -234,6 +250,7 @@ if __name__ == "__main__":
     print(f"Mean solving time  {np.mean(times)}")
     print(f"Median number of node created  {np.median(nnodes)}")
     print(f"Median solving time  {np.median(times)}")
+    print(f"Solve instances  {len(nnodes)}")
     
     
                          

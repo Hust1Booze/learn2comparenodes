@@ -44,12 +44,13 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
             open_nodes_number.append(open_node.getNumber())
         
         # random select
-        if np.random.rand() < 0.1 and len(open_nodes) > 1:
-            select_node = {"selnode":open_nodes[np.random.randint(0, len(open_nodes))]}
+        # if np.random.rand() < 0.1 and len(open_nodes) > 1:
+        #     select_node = {"selnode":open_nodes[np.random.randint(0, len(open_nodes))]}
 
         data = {
             "type" : "select",
-            "data" : [select_node_number],
+            "label" : [select_node_number],
+            "data": [select_node['selnode'].getNumber()],
             "cand" : open_nodes_number
         }
         self.saver.squence.append(data)

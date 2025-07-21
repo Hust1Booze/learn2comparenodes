@@ -81,6 +81,7 @@ def get_nodesels2models(nodesels, instance, problem, normalize, device):
                 fr = LPFeatureRecorder(model, device)
                 comp.set_LP_feature_recorder(fr)
 
+
             elif comp_policy == 'svm':
                 comp_featurizer = CompFeaturizerSVM(model)
                 n_primal = int(other.split('=')[-1])
@@ -107,8 +108,6 @@ def get_nodesels2models(nodesels, instance, problem, normalize, device):
             assert(nsel_name in ['estimate', 'dfs', 'bfs']) #to do add other default methods 
             priority = int(priority)
             model.setNodeselPriority(nsel_name, priority)
-            
-
             
         
         res[nodesel] = model
