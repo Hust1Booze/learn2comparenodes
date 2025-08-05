@@ -28,7 +28,7 @@ from torch.multiprocessing import Process, set_start_method
 import torch
 import time
 from pyscipopt.scip import Nodesel
-from dt_model import DTModel
+from learning.model import DTModel
 import re
 from recorders_debug import LPFeatureRecorder,CompFeaturizer
 
@@ -63,7 +63,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
 
     comb_model = DTModel()
     #comb_model.load_state_dict(torch.load("models/train_Jul13_14-43/best_select_model-2300.pt"))
-    state_dict = torch.load('models/train_Jul14_11-15/best_select_model-13300.pt', map_location=torch.device('cpu'))
+    state_dict = torch.load('models/train_Jul23_20-14/best_select_model-12400.pt', map_location=torch.device('cpu'))
     comb_model.load_state_dict(state_dict)
     comb_model.eval()
 
@@ -88,7 +88,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
         brancher.default_brancher = True 
     elif debug_model ==3: # only brancher
         selector.default_selector = True
-    elif debug_model ==4: #do nothing
+    elif debug_model ==2: #do nothing
         brancher.default_brancher = True 
         selector.default_selector = True
         nsel_name = 'estimate'
@@ -110,7 +110,9 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
     # if brancher.debug == True:
     #     branch_correct_rate = brancher.branch_correct/ brancher.step
     #     print(f"Brancher correct rate : {branch_correct_rate} for " + str(instance).split("/")[-1])
-    print(f"Got behaviour for instance with debug_model: {debug_model}  "+ str(instance).split("/")[-1]+ f' {model.getNNodes()} nodes, {model.getSolvingTime()} time')
+    
+    print(f"Got behaviour for instance with debug_model: {debug_model}  "+ str(instance).split("/")[-1]+ f' {model.getNNodes()} nodes, {model.getSolvingTime()} time' 
+          + f' {np.sum(selector.infer_times)} total infer time, {np.mean(selector.infer_times)} mean infer time, {len(selector.infer_times)} infer times' )
     
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")

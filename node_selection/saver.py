@@ -15,16 +15,23 @@ class SequenceSaver():
         node_id = []
         branch_label = []
         branch_action = []
+        branch_lp_features = []
         select_action = []
         select_label = []
 
         max_cand_length = 0
         max_data_length = 0
+        max_lp_features_length = 0
         for item in self.squence :
             if item["cand"] is not None :
                 max_cand_length = max(max_cand_length,len(item["cand"]))
             if item["data"] is not None :
                 max_data_length = max(max_data_length, len(item["data"]))
+            if item["type"] == 'branch':
+                if "LP_features" not in item:
+                    print(f'error in save branch_lp_features info')
+                else:
+                    max_lp_features_length = max(max_lp_features_length, len(item["LP_features"]))
 
         continue_branch = False # dont know why for setcover problem, select node1 3 times and may branch on node1 2 times with diff var
         for item in self.squence:
@@ -33,6 +40,7 @@ class SequenceSaver():
             branch_action.append(-1)
             select_action.append(-1)
             select_label.append(-1)
+            branch_lp_features.append([[0] * 19 for _ in range(max_lp_features_length)])
             if item['type'] == 'select':
                 select_node_number = item["data"][0]
                 label_node_number = item["label"][0]
@@ -56,6 +64,12 @@ class SequenceSaver():
                 cand.append(item["cand"] + [-1] * (max_cand_length - len(item["cand"])))
                 branch_label[-1] = item["branch_label"]
                 branch_action[-1] = item["data"][0]
+                # 获取特征向量的维度
+                if len(item["LP_features"]) > 0:
+                    feature_dim = len(item["LP_features"][0])
+                    # 用正确维度的零向量来pad
+                    padding = [[0] * feature_dim for _ in range(max_lp_features_length - len(item["LP_features"]))]
+                    branch_lp_features[-1] = item["LP_features"] + padding
             elif item['type'] == 'node':
                 data.append(item["data"] + [0] * (max_data_length - len(item["data"])))
                 type.append(3)
@@ -68,6 +82,7 @@ class SequenceSaver():
         node_id_tensor = torch.tensor(node_id, dtype=torch.int64)
         branch_label_tensor = torch.tensor(branch_label, dtype=torch.int64)
         branch_action_tensor = torch.tensor(branch_action, dtype=torch.int64)
+        branch_lp_features_tensor = torch.tensor(branch_lp_features, dtype=torch.float32)
         select_action_tensor = torch.tensor(select_action, dtype=torch.int64)
         select_label_tensor = torch.tensor(select_label, dtype=torch.int64)
         if len(node_id)>=5 and not continue_branch:
@@ -79,6 +94,7 @@ class SequenceSaver():
             torch.save(node_id_tensor, self.save_path + '/node_id.pt')
             torch.save(branch_label_tensor, self.save_path + '/branch_label.pt')
             torch.save(branch_action_tensor, self.save_path + '/branch_action.pt')
+            torch.save(branch_lp_features_tensor, self.save_path + '/branch_lp_features.pt')
             torch.save(select_action_tensor, self.save_path + '/select_action.pt')
             torch.save(select_label_tensor, self.save_path + '/select_label.pt')
             torch.save(self.milp_state, self.save_path + '/state.pt')

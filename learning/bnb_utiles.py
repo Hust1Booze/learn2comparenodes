@@ -13,12 +13,12 @@ import torch
 import time
 from pyscipopt.scip import Nodesel
 
-from dt_model import DTModel
+from learning.model import DTModel
 import re
 from recorders_debug import LPFeatureRecorder,CompFeaturizer
 
 
-# this class use to save Branch and bound sequence states, and output dt models input
+# this class use to save Branch and bound sequence states, and output models input
 class BNB_States():
     def __init__(self, comb_model, device): 
 
@@ -38,7 +38,7 @@ class BNB_States():
         self.state_emb = None
 
         self.max_data_length = 13
-        self.max_cand_length = 500
+        self.max_cand_length = 1000
     def receive_var2idx(self,var2idx):
         self.var2idx = var2idx
 
@@ -121,6 +121,7 @@ class BNB_Node_Selector(Nodesel):
         
         self.default_selector = False
 
+        self.infer_times = []
     def set_LP_feature_recorder(self, LP_feature_recorder):
         self.comp_behaviour_saver.set_LP_feature_recorder(LP_feature_recorder)
 
@@ -136,13 +137,17 @@ class BNB_Node_Selector(Nodesel):
         if len(open_nodes)==0:
             node = self.model.getBestboundNode()
         if len(open_nodes)==1 and self.step<3:
+            start_time = time.time()
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, nodes[0])
+            end_time = time.time()
+            self.infer_times.append(end_time - start_time)
             self.bnbstates.receive_origin_milp(g)
             node = self.model.getBestboundNode()
         
         if self.default_selector or len(open_nodes)<=1:
             node = self.model.getBestNode()
         else:
+            start_time = time.time()
             sorted_node_ids = self.comb_model.get_select_node_decision(*self.bnbstates.get_dt_input())
             node = None
             for node_id in sorted_node_ids:
@@ -152,7 +157,8 @@ class BNB_Node_Selector(Nodesel):
                         break
                 if node is not None:
                     break  # 找到就退出外层循环
-        
+            end_time = time.time()
+            self.infer_times.append(end_time - start_time)
         if node is None:
             #print("dumb selection")
             return {"selnode": node}

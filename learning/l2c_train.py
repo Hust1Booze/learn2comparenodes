@@ -1,39 +1,24 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Created on Sat Nov 20 10:38:45 2021
+
+@author: abdel
+"""
+
+
 import os
 import sys
 import torch
 import torch_geometric
 from pathlib import Path
-from learning.l2c_model import RankNet
+from learning.l2c_model import GNNPolicy
 from data_type import GraphDataset
-from utils import process, process_ranknet
-import numpy as np
+from utils import process
 
-def get_data(files):
-    
-    X = []
-    y = []
-    depths = []
-    
-    for file in files:
-        
-        f_array = np.loadtxt(file)
-        features = f_array[:-1]
-        comp_res = f_array[-1]
-        X.append(features)
-        y.append(comp_res)
-        depths.append(np.array([f_array[18], f_array[-3]]))
-        
-        
-    
-    
-    return np.array(X, dtype=np.float32), np.array(y, dtype=np.long), np.array(depths)
-
-
-    
 if __name__ == "__main__":
     
-    problem = "WPMS"
+    problem = "GISP"
     lr = 0.005
     n_epoch = 2
     n_sample = -1
@@ -41,8 +26,8 @@ if __name__ == "__main__":
     early_stopping = 20
     normalize = True
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    batch_train = 1
-    batch_valid  = 1
+    batch_train = 16
+    batch_valid  = 256
     
     loss_fn = torch.nn.BCELoss()
     optimizer_fn = torch.optim.Adam
@@ -78,42 +63,48 @@ if __name__ == "__main__":
 
 
     train_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
-                                                            f"../node_selection/data_svm/{problem}/train")).glob("*.csv") ][:n_sample]
+                                                            f"../node_selection/data/{problem}/train")).glob("*.pt") ][:n_sample]
     
     valid_files = [ str(path) for path in Path(os.path.join(os.path.dirname(__file__), 
-                                                            f"../node_selection/data_svm/{problem}/valid")).glob("*.csv") ][:int(0.2*n_sample if n_sample != -1 else -1)]
+                                                            f"../node_selection/data/{problem}/valid")).glob("*.pt") ][:int(0.2*n_sample if n_sample != -1 else -1)]
     
+
     if problem == 'FCMCNF':
         train_files = train_files + valid_files[3000:]
         valid_files = valid_files[:3000]
-    
-    X_train, y_train, _ = get_data(train_files)
-    X_valid, y_valid, _ = get_data(valid_files)
-    
 
-    
-    X_train = torch.from_numpy(X_train)
-    y_train = torch.from_numpy(y_train).unsqueeze(1)
-    #print(X_train)
-    X_valid = torch.from_numpy(X_valid)
-    y_valid = torch.from_numpy(y_valid).unsqueeze(1)
         
-    
-    X_train.to(device)
-    y_train.to(device)
-    X_valid.to(device)
-    y_valid.to(device)    
 
+    train_data = GraphDataset(train_files)
+    valid_data = GraphDataset(valid_files)
     
-    policy = RankNet().to(device)
+    
+# TO DO : learn something from the data
+    train_loader = torch_geometric.loader.DataLoader(train_data, 
+                                                     batch_size=batch_train, 
+                                                     shuffle=True, 
+                                                     follow_batch=['constraint_features_s', 
+                                                                   'constraint_features_t',
+                                                                   'variable_features_s',
+                                                                   'variable_features_t'])
+    
+    valid_loader = torch_geometric.loader.DataLoader(valid_data, 
+                                                     batch_size=batch_valid, 
+                                                     shuffle=False, 
+                                                     follow_batch=['constraint_features_s',
+                                                                   'constraint_features_t',
+                                                                   'variable_features_s',
+                                                                   'variable_features_t'])
+    
+    policy = GNNPolicy().to(device)
     optimizer = optimizer_fn(policy.parameters(), lr=lr) #ADAM is the best
     
     print("-------------------------")
-    print(f"Ranknet for problem {problem}")
-    print(f"Training on:          {len(X_train)} samples")
-    print(f"Validating on:        {len(X_valid)} samples")
-    print(f"Batch Size Train:     {1}")
-    print(f"Batch Size Valid      {1}")
+    print(f"GNN for problem {problem}")
+    print(f"Training on:          {len(train_data)} samples")
+    print(f"Validating on:        {len(valid_data)} samples")
+    print(f"Batch Size Train:     {batch_train}")
+    print(f"Batch Size Valid      {batch_valid}")
     print(f"Learning rate:        {lr} ")
     print(f"Number of epochs:     {n_epoch}")
     print(f"Normalize:            {normalize}")
@@ -127,26 +118,30 @@ if __name__ == "__main__":
     for epoch in range(n_epoch):
         print(f"Epoch {epoch + 1}")
         
-        train_loss, train_acc = process_ranknet(policy, 
-                                        X_train, y_train, 
+        train_loss, train_acc = process(policy, 
+                                        train_loader, 
                                         loss_fn,
                                         device,
-                                        optimizer=optimizer)
+                                        optimizer=optimizer, 
+                                        normalize=normalize)
         train_losses.append(train_loss)
         train_accs.append(train_acc)
         print(f"Train loss: {train_loss:0.3f}, accuracy {train_acc:0.3f}" )
     
-        valid_loss, valid_acc = process_ranknet(policy, 
-                                        X_valid, y_valid, 
+        valid_loss, valid_acc = process(policy, 
+                                        valid_loader, 
                                         loss_fn, 
                                         device,
-                                        optimizer=None)
+                                        optimizer=None,
+                                        normalize=normalize)
         valid_losses.append(valid_loss)
         valid_accs.append(valid_acc)
         
         print(f"Valid loss: {valid_loss:0.3f}, accuracy {valid_acc:0.3f}" )
     
-    torch.save(policy.state_dict(),f'policy_{problem}_ranknet.pkl')
-    
-    
+    torch.save(policy.state_dict(),f'policy_{problem}.pkl')
+
+
+
+
 

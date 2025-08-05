@@ -11,7 +11,7 @@ def load_src(name, fpath):
      return imp.load_source(name, os.path.join(os.path.dirname(__file__), fpath))
 
 load_src("data_type", "../learning/data_type.py" )
-load_src("model", "../learning/model.py" )
+load_src("model", "../learning/l2c_model.py" )
 
 import torch
 import time

@@ -34,10 +34,10 @@ def distribute(n_instance, n_cpu):
 
 if __name__ == "__main__":
     instance = None
-    n_cpu = 4
-    n_instance = 100
+    n_cpu = 10
+    n_instance = 1000
     
-    problem = 'GISP'
+    problem = 'WPMS'
     data_partition = 'train'
     n_nodes = 50
     er_prob = 0.6 #0.33 for FCMCNF, this doesnt change

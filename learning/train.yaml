@@ -1,5 +1,5 @@
 batch_size : 16
-problem : "SETCOVER"
+problem : "GISP"
 
 select_loss_weight : 0.0
 branch_loss_weight : 1

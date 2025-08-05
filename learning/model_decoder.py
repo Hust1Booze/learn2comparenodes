@@ -1,24 +1,35 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from gnnencoder import GNNEncoder
+from learning.gnn_encoder import GNNEncoder
 
 
 class DTModel(nn.Module):
-    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
+    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False, use_decoder = True):
         super().__init__()
         self.d_model = d_model  # 保存d_model参数
         self.token_proj = nn.Linear(13, d_model)  # project all input tokens to d_model dim
         self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=0)
         self.pos_embedding = nn.Embedding(10000, d_model) # support 10000 sequence length 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout,dim_feedforward =128, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        self.encoder_layer_branch = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*4, dropout=dropout, batch_first=True)
+        self.encoder_layer_select = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dim_feedforward=d_model*4, dropout=dropout, batch_first=True)
+        self.encoder_branch = nn.TransformerEncoder(self.encoder_layer_branch, num_layers=n_layers)
+        self.encoder_select = nn.TransformerEncoder(self.encoder_layer_select, num_layers=n_layers)
+
+        self.decoder_layer_branch = nn.TransformerDecoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
+        self.decoder_layer_select = nn.TransformerDecoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout, batch_first=True)
+        self.decoder_branch = nn.TransformerDecoder(self.decoder_layer_branch, num_layers=n_layers)
+        self.decoder_select = nn.TransformerDecoder(self.decoder_layer_select, num_layers=n_layers)
 
         self.max_nodes = 10000
         self.max_vars = 10000
 
         self.temperature = temperature
         self.use_soft_score_label = use_soft_score_label
+        self.use_decoder = use_decoder
 
         self.branch_var_embedding = nn.Embedding(self.max_vars, d_model)        # for branch var
         self.reward_embedding = nn.Linear(1, d_model)                           # for reward (scalar → vector)
@@ -32,7 +43,7 @@ class DTModel(nn.Module):
         )
 
         self.select_head = nn.Sequential(
-            nn.Linear(2*d_model, d_model),
+            nn.Linear(d_model, d_model),
             nn.ReLU(),
             nn.Linear(d_model, d_model // 2),
             nn.ReLU(),
@@ -40,7 +51,7 @@ class DTModel(nn.Module):
         )
 
         self.branch_head = nn.Sequential(
-            nn.Linear(2*d_model, d_model),
+            nn.Linear(d_model, d_model),
             nn.ReLU(),
             nn.Linear(d_model, d_model // 2),
             nn.ReLU(),
@@ -72,22 +83,22 @@ class DTModel(nn.Module):
         branch_cand_masks = sequence_data["branch_cand_masks"].to(device)
         node_id_masks = sequence_data["node_id_masks"].to(device)
 
-
-
         states_embd, states_mask = self.deal_states(states, device)
         
-        #_select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
         _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, states_embd, branch_actions, device)
 
-        select_sequence_embd = self.transformer(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
-        branch_sequence_embd = self.transformer(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
+        encoder_select_sequence_embd = self.encoder_select(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
+        encoder_branch_sequence_embd = self.encoder_branch(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
+        select_sequence_embd = self.decoder_select(encoder_select_sequence_embd, states_embd, tgt_key_padding_mask=select_sequence_masks, memory_key_padding_mask=states_mask)
+        branch_sequence_embd = self.decoder_branch(states_embd, encoder_branch_sequence_embd, tgt_key_padding_mask=states_mask, memory_key_padding_mask=branch_sequence_masks)
 
-        select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
-        branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask)
+        branch_logits = self.branch_head(branch_sequence_embd)
+        select_logits = self.select_head(select_sequence_embd)
 
         # cal branch loss
         branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
         select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_labels, node_ids)
+
 
         return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
     
@@ -126,6 +137,7 @@ class DTModel(nn.Module):
 
         return states_emb_tensor, states_emb_masks_tensor
     
+
     def combine_sequence_embd(self,select_sequences, branch_sequences, types, states_emb, branch_actions, device):
         select_sequence_embd = self.token_proj(select_sequences)
         branch_sequence_embd = self.token_proj(branch_sequences)
@@ -148,30 +160,6 @@ class DTModel(nn.Module):
                         branch_sequence_embd[batch_idx, seq_idx] = states_emb[batch_idx, state_idx]
                     else:
                         print(f'why state_idx {state_idx} out of range')
-
-        types_embd = self.type_embedding(types)
-
-        # 创建position embedding
-        batch_size, select_seq_len, _ = select_sequence_embd.shape
-        _, branch_seq_len, _ = branch_sequence_embd.shape
-        
-        # 创建position indices
-        select_positions = torch.arange(select_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
-        branch_positions = torch.arange(branch_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
-        
-        # 获取position embeddings
-        select_pos_embd = self.pos_embedding(select_positions)
-        branch_pos_embd = self.pos_embedding(branch_positions)
-
-        # 组合所有embeddings: token + type + position
-        select_sequence_embd = select_sequence_embd + types_embd[:,:select_sequence_embd.shape[1],:] + select_pos_embd
-        branch_sequence_embd = branch_sequence_embd + types_embd[:,:branch_sequence_embd.shape[1],:] + branch_pos_embd
-
-        return select_sequence_embd,branch_sequence_embd
-    
-    def combine_sequence_embd_old_version(self,select_sequences, branch_sequences, types, device):
-        select_sequence_embd = self.token_proj(select_sequences)
-        branch_sequence_embd = self.token_proj(branch_sequences)
 
         types_embd = self.type_embedding(types)
 
@@ -268,8 +256,8 @@ class DTModel(nn.Module):
 
         batch_indices = torch.arange(batch_size, device=branch_logits.device)
         # labels 就表示label在cands中的位置
-        #target = branch_cands[batch_indices,branch_labels]  
-        target = branch_labels.to(branch_logits.device)     
+        #target = branch_cands[batch_indices,branch_labels]      
+        target = branch_labels.to(branch_logits.device) 
         # 计算交叉熵损失
         loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
         
@@ -379,40 +367,41 @@ class DTModel(nn.Module):
         
         return attended_output, attention_weights
 
-    def get_select_node_decision(self, states_embd, sequence_tensor, type_tensor, cand_tensor,node_id_tensor,branch_label_tensor,\
-                                    branch_action_tensor,select_action_tensor,select_label_tensor):
-        with torch.no_grad():  # 用于推理但不训练
-            sequence_embd,_ = self.get_inference_sequence_embd(states_embd, sequence_tensor, type_tensor, branch_action_tensor, sequence_tensor.device)
-            sequence_embd = self.transformer(sequence_embd)
-            select_logits = self.deal_select(sequence_embd, None, states_embd.unsqueeze(0), None)
+    def get_select_node_decision(self, state_embd, sequence_tensor, types, node_id):
+        sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
+        sequence_embd = self.transformer(sequence_embd.unsqueeze(0))
+        select_logits = self.deal_select(sequence_embd.unsqueeze(0), None, state_embd.unsqueeze(0), None)
 
-            select_logits = select_logits.squeeze(-1)
-            mask = node_id_tensor == -1
-            select_logits = select_logits.masked_fill(mask, float('-inf'))
-            
-            # 根据select_logits的大小对node_id_tensor排序（从大到小）
-            sorted_indices = torch.argsort(select_logits, descending=False)
-            sorted_node_ids = node_id_tensor[sorted_indices]
-
-            # 将tensor转换为list
-            sorted_node_ids_list = sorted_node_ids.squeeze(0).tolist()
-        
-        return sorted_node_ids_list
+        return select_logits
         
     def get_branch_var_decision(self, state_embd, sequence_tensor, types, node_id):
 
         with torch.no_grad():  # 用于推理但不训练
-            _, sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
+            sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id)
             sequence_embd = self.transformer(sequence_embd)
             branch_logits = self.deal_branch(sequence_embd, None, state_embd.unsqueeze(0), None)
 
         return branch_logits
 
-    def get_inference_sequence_embd(self,states_embd, sequence_tensor, type_tensor, branch_action_tensor,device):
+    def get_inference_sequence_embd(self, sequence_tensor, types, node_id):
 
-        select_sequence_embd, branch_sequence_embd = self.combine_sequence_embd(sequence_tensor.unsqueeze(0), sequence_tensor.unsqueeze(0), type_tensor.unsqueeze(0), states_embd.unsqueeze(0), branch_action_tensor.unsqueeze(0), device)
+        ######### step 1 merge input embd ############
+        sequence_embd = self.token_proj(sequence_tensor)
 
-        return select_sequence_embd,branch_sequence_embd
+        types_embd = self.type_embedding(types)
+
+        seq_len, _ = sequence_embd.shape
+        
+        # 创建position indices
+        positions = torch.arange(seq_len, device=sequence_embd.device).unsqueeze(0)
+        
+        # 获取position embeddings
+        pos_embd = self.pos_embedding(positions)
+
+        # 组合所有embeddings: token + type + position
+        sequence_embd = sequence_embd + types_embd + pos_embd
+
+        return sequence_embd
 
     def print_model_info(self):
         """

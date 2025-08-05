@@ -27,10 +27,12 @@ def simple_collate_fn(batch):
     select_labels = [item[7] for item in batch]
     branch_actions = [item[8] for item in batch]
     branch_labels = [item[9] for item in batch]
+    branch_lp_features = [item[10] for item in batch]
 
     # 找到batch中的最大序列长度（只遍历一次）
     max_select_seq_len = max(len(seq) for seq in select_sequences)
     max_branch_seq_len = max(len(seq) for seq in branch_sequences)
+    max_branch_lp_features = max(len(seq) for seq in branch_lp_features)
     max_select_cands = max(len(seq) for seq in select_cands)
     max_branch_cands = max(len(seq) for seq in branch_cands)
     max_node_id = max(len(node_id) for node_id in node_ids)
@@ -58,9 +60,10 @@ def simple_collate_fn(batch):
     branch_cand_masks = []
     node_id_masks = []
     padded_branch_actions = []
+    padded_branch_lp_features_list = []
     # 只遍历一次batch，完成所有padding和mask生成
-    for seq, branch_seq, select_cand, branch_cand, node_id, type, branch_action in zip(
-        select_sequences, branch_sequences, select_cands, branch_cands, node_ids, types, branch_actions
+    for seq, branch_seq, select_cand, branch_cand, node_id, type, branch_action, branch_lp_feature in zip(
+        select_sequences, branch_sequences, select_cands, branch_cands, node_ids, types, branch_actions, branch_lp_features
     ):
         # 处理select_sequences
         seq_len = len(seq)
@@ -149,6 +152,16 @@ def simple_collate_fn(batch):
             padded_branch_action = torch.full((max_branch_actions,), -1, dtype=branch_action.dtype)
         padded_branch_action[:branch_action_len] = branch_action
         padded_branch_actions.append(padded_branch_action)
+
+        # 处理branch_lp_features
+        branch_lp_features_len = len(branch_lp_feature)
+        if len(branch_lp_feature.shape) > 1:
+            padded_branch_lp_features = torch.full((max_branch_lp_features, branch_lp_feature.shape[1]), 0, dtype=branch_lp_feature.dtype)
+        else:
+            padded_branch_lp_features = torch.full((max_branch_lp_features,), 0, dtype=branch_lp_feature.dtype)
+        padded_branch_lp_features[:branch_lp_features_len] = branch_lp_feature
+        padded_branch_lp_features_list.append(padded_branch_lp_features)
+
     # 堆叠所有tensor
     batched_data = {
         'select_sequences': torch.stack(padded_select_sequences),
@@ -165,7 +178,7 @@ def simple_collate_fn(batch):
         'select_cand_masks': torch.stack(select_cand_masks),
         'branch_cand_masks': torch.stack(branch_cand_masks),
         'node_id_masks': torch.stack(node_id_masks),
-    
+        'branch_lp_features': torch.stack(padded_branch_lp_features_list),
     }
     
     return states, batched_data
@@ -269,6 +282,7 @@ class BnBSequentialDataset(Dataset):
         _node_id = torch.load(dir_path / 'node_id.pt')
         _branch_labels = torch.load(dir_path / 'branch_label.pt')
         _branch_actions = torch.load(dir_path / 'branch_action.pt')
+        _branch_lp_features = torch.load(dir_path / 'branch_lp_features.pt')
         _select_actions = torch.load(dir_path / 'select_action.pt')
         _select_labels = torch.load(dir_path / 'select_label.pt')
 
@@ -284,6 +298,7 @@ class BnBSequentialDataset(Dataset):
         branch_actions = _branch_actions
         select_actions = _select_actions
         select_labels = _select_labels
+        branch_lp_features = _branch_lp_features
 
         # 找到type=1和type=0的位置
         type_1_indices = torch.where(type == 1)[0][1:]  # select positions, not choose first selct
@@ -299,11 +314,12 @@ class BnBSequentialDataset(Dataset):
         branch_sequence = sequence_data[:branch_idx]
         branch_action = branch_actions[:branch_idx]
         branch_label = branch_labels[branch_idx]
+        branch_lp_features = branch_lp_features[branch_idx]
 
         if select_action not in node_id:
             print(f"select_idx not in node_id: {select_idx}")
 
-        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action, branch_label
+        return state, select_sequence, branch_sequence, cand[select_idx], cand[branch_idx] ,node_id[:select_idx], type, select_action, branch_action, branch_label, branch_lp_features
     
 
 def calculate_average_reward_static(dataset):

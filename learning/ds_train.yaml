@@ -1,0 +1,9 @@
+batch_size : 16
+problem : "SETCOVER"
+
+select_loss_weight : 0.1
+branch_loss_weight : 1.0
+
+lr : 0.0005
+
+max_samples : 1000

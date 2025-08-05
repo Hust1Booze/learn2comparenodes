@@ -1,218 +1,451 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Oct 19 20:44:58 2021
-
-@author: abdel
-from https://github.com/ds4dm/ecole/blob/master/examples/branching-imitation.ipynb with some modifications
-"""
-
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-import torch_geometric
-from torch_geometric.nn import GraphConv
-from data_type import BipartiteGraphPairData
+from gnn_encoder import GNNEncoder
+# from xformers.ops import memory_efficient_attention
 
 
-
-class RankNet(torch.nn.Module):
-
-    def __init__(self):
-        super(RankNet, self).__init__()
-
-        self.linear1 = torch.nn.Linear(20, 50)
-        self.activation = torch.nn.LeakyReLU()
-        self.linear2 = torch.nn.Linear(50, 1)
-        
-    def forward_node(self, n):
-        x = self.linear1(n)
-        x = self.activation(x)
-        x = self.linear2(x)
-        return x
-        
-
-    def forward(self, n0,n1):
-        s0,s1 = self.forward_node(n0), self.forward_node(n1)
-   
-        return torch.sigmoid(-s0 + s1)
-    
-    
-    
-
-class GNNPolicy(torch.nn.Module):
-    def __init__(self):
+class DTModel(nn.Module):
+    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
         super().__init__()
-        
-        self.emb_size = emb_size = 32 #uniform node feature embedding dim
-        
-        hidden_dim1 = 8
-        hidden_dim2 = 4
-        hidden_dim3 = 4
-        
-        # static data
-        cons_nfeats = 4
-        edge_nfeats = 1
-        var_nfeats = 6
-        
+        self.d_model = d_model  # 保存d_model参数
+        self.token_proj = nn.Linear(13, d_model)  # project all input tokens to d_model dim
+        self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=0)
+        self.pos_embedding = nn.Embedding(10000, d_model) # support 10000 sequence length 
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout,dim_feedforward =128, batch_first=True)
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.max_nodes = 10000
+        self.max_vars = 10000
 
-        # CONSTRAINT EMBEDDING
-        self.cons_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(cons_nfeats),
-            torch.nn.Linear(cons_nfeats, emb_size),
-            torch.nn.ReLU(),
+        self.temperature = temperature
+        self.use_soft_score_label = use_soft_score_label
+
+        self.branch_var_embedding = nn.Embedding(self.max_vars, d_model)        # for branch var
+        self.reward_embedding = nn.Linear(1, d_model)                              # for reward (scalar → vector)
+        self.node_embedding = nn.Linear(8, d_model)  
+        self.lp_embedding = nn.Linear(19, d_model)
+        self.gnn_encoder = GNNEncoder()
+        self.output_head = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, 1)  # example: predict score or class
         )
 
-        # EDGE EMBEDDING
-        self.edge_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(edge_nfeats),
+        self.select_head = nn.Sequential(
+            nn.Linear(2*d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, 1)
         )
 
-        # VARIABLE EMBEDDING
-        self.var_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(var_nfeats),
-            torch.nn.Linear(var_nfeats, emb_size),
-            torch.nn.ReLU(),
+        self.branch_head = nn.Sequential(
+            nn.Linear(3*d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, 1)
         )
-        
-        self.bounds_embedding = torch.nn.Sequential(
-            torch.nn.LayerNorm(2),
-            torch.nn.Linear(2,2),
-            torch.nn.ReLU(),
-        )
-
-
-
-        #double check
- 
-        self.convs = []
-        
-        self.conv1 = GraphConv((emb_size, emb_size), hidden_dim1 )
-        self.conv2 = GraphConv((hidden_dim1, hidden_dim1), hidden_dim2 )
-        self.conv3 = GraphConv((hidden_dim2, hidden_dim2), hidden_dim3 )
-        
-        self.convs = [ self.conv1, self.conv2, self.conv3 ]
-        
-        out_size = hidden_dim3 if len(self.convs)==3 else emb_size
-        
-        self.final_mlp = torch.nn.Sequential( 
-                            torch.nn.Linear(2*out_size+2, 1, bias=False),
-                            torch.nn.Sigmoid()
-                            )
-           
 
     
-    def forward(self, batch, inv=False, epsilon=0.01):
+    def forward(self, states, sequence_data, device):
         
-        
-        #create constraint masks. COnstraint associated with varialbes for which at least one of their bound have changed
-        
-        #variables for which at least one of their bound have changed
+        select_loss = torch.tensor(0.0, device=device)
+        branch_loss = torch.tensor(0.0, device=device)
+        select_steps = 0
+        branch_steps = 0
+        select_corrects = 0
+        branch_corrects = 0
 
-        #graph1 edges
-        
-        try :
-       
-            graph0 = (batch.constraint_features_s, 
-                      batch.edge_index_s, 
-                      batch.edge_attr_s, 
-                      batch.variable_features_s, 
-                      batch.bounds_s,
-                      batch.constraint_features_s_batch,
-                      batch.variable_features_s_batch)
-            
-        
-            graph1 = (batch.constraint_features_t,
-                      batch.edge_index_t, 
-                      batch.edge_attr_t,
-                      batch.variable_features_t,
-                      batch.bounds_t,
-                      batch.constraint_features_t_batch,
-                      batch.variable_features_t_batch)
-                
-        except AttributeError:
-            graph0 = (batch.constraint_features_s, 
-                      batch.edge_index_s, 
-                      batch.edge_attr_s, 
-                      batch.variable_features_s,
-                      batch.bounds_s)
-            
-        
-            graph1 = (batch.constraint_features_t,
-                      batch.edge_index_t, 
-                      batch.edge_attr_t,
-                      batch.variable_features_t,
-                      batch.bounds_t)
-        
-        if inv:
-            graph0, graph1 = graph1, graph0
-        
-        score0 = self.forward_graph(*graph0) #concatenation of averages variable/constraint features after conv 
-        score1 = self.forward_graph(*graph1)
-        
-        #return self.final_mlp(-score0 + score1).squeeze(1)
-        
-        return torch.sigmoid(-score0+score1)
-        
-        
-       
-    def forward_graph(self, constraint_features, edge_indices, edge_features, 
-                       variable_features, bbounds, constraint_batch=None, variable_batch=None):
+        select_sequences = sequence_data["select_sequences"].to(device)
+        branch_sequences = sequence_data["branch_sequences"].to(device)
+        select_cands = sequence_data["select_cands"].to(device)
+        branch_cands = sequence_data["branch_cands"].to(device)
+        node_ids = sequence_data["node_ids"].to(device)
+        types = sequence_data["types"].to(device)
+        select_labels = sequence_data["select_labels"]
+        branch_labels = sequence_data["branch_labels"]
+        branch_actions = sequence_data["branch_actions"].to(device)
+        branch_lp_features = sequence_data["branch_lp_features"].to(device)
+        select_sequence_masks = sequence_data["select_sequence_masks"].to(device)
+        branch_sequence_masks = sequence_data["branch_sequence_masks"].to(device)
+        select_cand_masks = sequence_data["select_cand_masks"].to(device)
+        branch_cand_masks = sequence_data["branch_cand_masks"].to(device)
+        node_id_masks = sequence_data["node_id_masks"].to(device)
 
+
+
+
+        states_embd, states_mask = self.deal_states(states, device)
         
-        #Assume edge indice var to cons, constraint_mask of shape [Nconvs]       
-        
-        
-        variable_features = self.var_embedding(variable_features)
-        constraint_features = self.cons_embedding(constraint_features)
-        edge_features = self.edge_embedding(edge_features)
-        bbounds = self.bounds_embedding(bbounds)
-        
-        
-        
-        edge_indices_reversed = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
-        
-        
-        
-        for conv in self.convs:
-            
-            #Var to cons
-            constraint_features_next = F.relu(conv((variable_features, constraint_features), 
-                                              edge_indices,
-                                              edge_weight=edge_features,
-                                              size=(variable_features.size(0), constraint_features.size(0))))
-            
-            #cons to var 
-            variable_features = F.relu(conv((constraint_features, variable_features), 
-                                      edge_indices_reversed,
-                                      edge_weight=edge_features,
-                                      size=(constraint_features.size(0), variable_features.size(0))))
-            
-            constraint_features = constraint_features_next
-            
-            
-            
-            
-            
-            
-        
-        if constraint_batch is not None:
-        
-            constraint_avg = torch_geometric.nn.pool.avg_pool_x(constraint_batch, 
-                                                                   constraint_features,
-                                                                   constraint_batch)[0]
-            variable_avg = torch_geometric.nn.pool.avg_pool_x(variable_batch, 
-                                                                 variable_features,
-                                                                 variable_features)[0]
-        else:
-            constraint_avg = torch.mean(constraint_features, axis=0, keepdim=True)
-            variable_avg = torch.mean(variable_features, axis=0, keepdim=True)
-            
-        #return torch.cat((variable_avg, constraint_avg, bbounds), dim=1)
-        return torch.linalg.norm(variable_avg, dim=1) + torch.linalg.norm(constraint_avg, dim=1) + torch.linalg.norm(bbounds, dim=1)
+        #_select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, device)
+        _select_sequence_embd,_branch_sequence_embd = self.combine_sequence_embd(select_sequences, branch_sequences, types, states_embd, branch_actions, device)
+
+        select_sequence_embd = self.transformer(_select_sequence_embd, src_key_padding_mask=select_sequence_masks)
+        branch_sequence_embd = self.transformer(_branch_sequence_embd, src_key_padding_mask=branch_sequence_masks)
+        # select_sequence_embd = self.xformers_self_attention(_select_sequence_embd, key_padding_mask=select_sequence_masks)
+        # branch_sequence_embd = self.xformers_self_attention(_branch_sequence_embd, key_padding_mask=branch_sequence_masks)
+
+        select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
+        branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask, branch_lp_features, branch_cands)
+
+        # cal branch loss
+        branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
+        select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_labels, node_ids)
+
+        return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
     
 
+    def deal_states(self, states, device):
+        max_state_emb_len = 0
+        states_emb = []
+        for state in states:
+            gnn_input = [x.to(device) for x in state]
+            state_emb = self.gnn_encoder(*gnn_input)  # [num_vars, D]
+            states_emb.append(state_emb)
+            max_state_emb_len = max(max_state_emb_len,state_emb.shape[0])
+
+        # 对states_emb进行padding并转换为tensor
+        padded_states_emb = []
+        states_emb_masks = []
+        
+        for state_emb in states_emb:
+            state_emb_len = state_emb.shape[0]
+            d_model = state_emb.shape[1]
+            
+            # 创建padded tensor (用0填充)
+            padded_state_emb = torch.zeros(max_state_emb_len, d_model, dtype=state_emb.dtype, device=device)
+            padded_state_emb[:state_emb_len] = state_emb
+            
+            # 创建mask (True表示mask位置，False表示正常位置)
+            state_emb_mask = torch.ones(max_state_emb_len, dtype=torch.bool, device=device)
+            state_emb_mask[:state_emb_len] = False
+            
+            padded_states_emb.append(padded_state_emb)
+            states_emb_masks.append(state_emb_mask)
+        
+        # 堆叠成batch tensor
+        states_emb_tensor = torch.stack(padded_states_emb)  # [batch_size, max_state_emb_len, d_model]
+        states_emb_masks_tensor = torch.stack(states_emb_masks)  # [batch_size, max_state_emb_len]
+
+        return states_emb_tensor, states_emb_masks_tensor
     
+    def combine_sequence_embd(self,select_sequences, branch_sequences, types, states_emb, branch_actions, device):
+        select_sequence_embd = self.token_proj(select_sequences)
+        branch_sequence_embd = self.token_proj(branch_sequences)
+
+        # 替换branch_sequence_embd中branch_actions不为-1的位置
+        # branch_actions: [batch_size, seq_len] - 记录states_emb的位置
+        # states_emb: [batch_size, max_state_emb_len, d_model]
+        batch_size, branch_seq_len, d_model = branch_sequence_embd.shape
+        
+        # 创建mask，标识哪些位置需要替换
+        replace_mask = (branch_actions != -1)  # [batch_size, seq_len]
+        
+        # 替换 sequence_embd中branch的位置 为 states中var的embd
+        for batch_idx in range(batch_size):
+            for seq_idx in range(branch_seq_len):
+                if replace_mask[batch_idx, seq_idx]:
+                    state_idx = branch_actions[batch_idx, seq_idx]
+                    # 确保索引在有效范围内
+                    if state_idx < states_emb.shape[1]:
+                        branch_sequence_embd[batch_idx, seq_idx] = states_emb[batch_idx, state_idx]
+                    else:
+                        print(f'why state_idx {state_idx} out of range')
+
+        types_embd = self.type_embedding(types)
+
+        # 创建position embedding
+        batch_size, select_seq_len, _ = select_sequence_embd.shape
+        _, branch_seq_len, _ = branch_sequence_embd.shape
+        
+        # 创建position indices
+        select_positions = torch.arange(select_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        branch_positions = torch.arange(branch_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        
+        # 获取position embeddings
+        select_pos_embd = self.pos_embedding(select_positions)
+        branch_pos_embd = self.pos_embedding(branch_positions)
+
+        # 组合所有embeddings: token + type + position
+        select_sequence_embd = select_sequence_embd + types_embd[:,:select_sequence_embd.shape[1],:] + select_pos_embd
+        branch_sequence_embd = branch_sequence_embd + types_embd[:,:branch_sequence_embd.shape[1],:] + branch_pos_embd
+
+        return select_sequence_embd,branch_sequence_embd
+    
+    def combine_sequence_embd_old_version(self,select_sequences, branch_sequences, types, device):
+        select_sequence_embd = self.token_proj(select_sequences)
+        branch_sequence_embd = self.token_proj(branch_sequences)
+
+        types_embd = self.type_embedding(types)
+
+        # 创建position embedding
+        batch_size, select_seq_len, _ = select_sequence_embd.shape
+        _, branch_seq_len, _ = branch_sequence_embd.shape
+        
+        # 创建position indices
+        select_positions = torch.arange(select_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        branch_positions = torch.arange(branch_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        
+        # 获取position embeddings
+        select_pos_embd = self.pos_embedding(select_positions)
+        branch_pos_embd = self.pos_embedding(branch_positions)
+
+        # 组合所有embeddings: token + type + position
+        select_sequence_embd = select_sequence_embd + types_embd[:,:select_sequence_embd.shape[1],:] + select_pos_embd
+        branch_sequence_embd = branch_sequence_embd + types_embd[:,:branch_sequence_embd.shape[1],:] + branch_pos_embd
+
+        return select_sequence_embd,branch_sequence_embd
 
 
+    def deal_branch(self, branch_sequence_embd, branch_sequence_masks, states_embd, states_mask, branch_lp_features, branch_actions):
+        """
+        处理branch序列和state的交互
+        Args:
+            branch_sequence_embd: [batch_size, seq_len, d_model] - branch序列embeddings
+            branch_sequence_masks: [batch_size, seq_len] - branch序列的padding mask
+            states_embd: [batch_size, num_vars, d_model] - state embeddings
+            states_mask: [batch_size, num_vars] - state的padding mask
+        Returns:
+            branch_logits: [batch_size,num_vars, 1]
+        """
+        
+        attended_output, attention_weights = \
+            self.cross_attention(states_embd, branch_sequence_embd, branch_sequence_embd, states_mask, branch_sequence_masks)
+        
+        combine_branch_embd = torch.cat([states_embd, attended_output], dim=-1) #[batch, numvars, d_model*2]
 
- 
+        branch_lp_features = self.lp_embedding(branch_lp_features)
+        # 将branch_lp_features添加到combine_branch_embd中
+        # 处理branch_actions中的-1 padding值
+        batch_size, seq_len = branch_actions.shape
+        valid_mask = branch_actions != -1  # [batch_size, seq_len]
+        
+        # 创建结果tensor，初始化为零
+        result_tensor = torch.zeros(batch_size, seq_len, combine_branch_embd.shape[-1], 
+                                  device=combine_branch_embd.device, dtype=combine_branch_embd.dtype)
+        
+        # 只对有效位置进行索引
+        for batch_idx in range(batch_size):
+            valid_indices = valid_mask[batch_idx]  # [seq_len]
+            if valid_indices.any():
+                valid_actions = branch_actions[batch_idx][valid_indices]  # 获取有效的action索引
+                valid_features = combine_branch_embd[batch_idx][valid_actions]  # 获取对应的特征
+                result_tensor[batch_idx][valid_indices] = valid_features
+        
+        # 将branch_lp_features与结果tensor拼接
+        combine_branch_embd = torch.cat([result_tensor, branch_lp_features], dim=-1)
+
+        branch_logits = self.branch_head(combine_branch_embd)
+
+        return branch_logits 
+
+
+    def deal_select(self, select_sequence_embd, select_sequence_masks, states_embd, states_mask):
+        """
+        处理branch序列和state的交互
+        Args:
+            branch_sequence_embd: [batch_size, seq_len, d_model] - branch序列embeddings
+            branch_sequence_masks: [batch_size, seq_len] - branch序列的padding mask
+            states_embd: [batch_size, num_vars, d_model] - state embeddings
+            states_mask: [batch_size, num_vars] - state的padding mask
+        Returns:
+            branch_logits: [batch_size,num_vars, 1]
+        """
+        
+        attended_output, attention_weights = \
+            self.cross_attention(select_sequence_embd, states_embd, states_embd, select_sequence_masks, states_mask)
+
+        
+        combine_select_embd = torch.cat([select_sequence_embd, attended_output], dim=-1) #[batch, num_seq, d_model*2]
+
+        select_logits = self.select_head(combine_select_embd)
+
+        return select_logits 
+
+
+    def cal_branch_loss(self, branch_logits, branch_cands, branch_labels):
+        """
+        calculate branch loss
+        Args:
+            branch_logits: [batch_size, num_vars, 1] - branch logits
+            branch_cands: [batch_size, num_candidates] - branch candidates, each is a index of branch_logits
+            branch_labels: [batch_size] - branch labels
+        Returns:
+            branch_loss: scalar - branch loss
+        """
+        branch_logits = branch_logits.squeeze(-1)
+        # 创建mask：True表示需要mask的位置（无效candidate），False表示有效candidate
+        candidate_mask = branch_cands == -1
+        # 将无效candidate位置的logits设为-inf
+        masked_logits = branch_logits.masked_fill(candidate_mask, float('-inf'))
+
+        # labels 就表示label在cands中的位置
+        target = branch_labels.to(branch_logits.device)     
+        # 计算交叉熵损失
+        loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
+        
+        # 计算top1, top5, top10准确率
+        _, top_indices = masked_logits.topk(k=10, dim=-1)  # [batch_size, 10]
+        
+        # 检查top1是否包含标签
+        top1_correct = (top_indices[:, 0] == target).float().mean().item()
+        
+        # 检查top5是否包含标签
+        top5_correct = torch.any(top_indices[:, :5] == target.unsqueeze(1), dim=1).float().mean().item()
+        
+        # 检查top10是否包含标签
+        top10_correct = torch.any(top_indices == target.unsqueeze(1), dim=1).float().mean().item()
+        
+        return loss.mean(), top1_correct, top5_correct, top10_correct
+
+    def cal_select_loss(self, select_logits, select_cands, select_labels, node_ids):
+        """
+        calculate select loss
+        Args:
+            select_logits: [batch_size, num_seq, 1] - select logits
+            select_cands: [batch_size, num_candidates] - select candidates, each is a index of select_logits
+            select_labels: [batch_size] - select labels (node id)
+            node_ids: [batch_size * seq] - node ids
+        Returns:
+            select_loss: scalar - select loss
+        """
+
+        select_logits = select_logits.squeeze(-1)
+        mask = node_ids == -1
+        select_logits = select_logits.masked_fill(mask, float('-inf'))
+
+        # 找到select labels 在node_ids中的位置作为target
+        batch_size = select_logits.shape[0]
+        target = torch.zeros(batch_size, dtype=torch.long, device=select_logits.device)
+        
+        for i in range(batch_size):
+            sample_node_ids = node_ids[i]  # [seq_len]
+            label = select_labels[i]  # node id
+            
+            # 找到action在node_ids中的位置
+            action_positions = (sample_node_ids == label).nonzero(as_tuple=True)[0]
+            if len(action_positions) > 0:
+                target[i] = action_positions[0]  # 取第一个匹配的位置
+            else:
+                target[i] = 0  # 默认值，会被mask掉
+                print(f'label node id {label} not found in node_ids {sample_node_ids}')
+
+        loss = F.cross_entropy(select_logits, target, reduction='none')
+        
+        # 只计算top1准确率
+        _, top_indices = select_logits.topk(k=1, dim=-1)  # [batch_size, 1]
+        
+        # 检查top1是否包含标签
+        top1_correct = (top_indices[:, 0] == target).float().mean().item()
+        
+        # select任务只关注top1，top5和top10设为0
+        top5_correct = 0.0
+        top10_correct = 0.0
+        
+        return loss.mean(), top1_correct, top5_correct, top10_correct
+    
+    def cross_attention(self, query, key, value, query_mask=None, key_mask=None):
+        """
+        Cross attention function with padding masks for both query and key
+        Args:
+            query: [batch_size, seq_len, d_model] - query embeddings
+            key: [batch_size, num_vars, d_model] - key embeddings  
+            value: [batch_size, num_vars, d_model] - value embeddings
+            query_mask: [batch_size, seq_len] - query padding mask
+            key_mask: [batch_size, num_vars] - key padding mask (True=padding)
+        Returns:
+            attended_output: [batch_size, seq_len, d_model]
+            attention_weights: [batch_size, seq_len, num_vars]
+        """
+        batch_size, seq_len, d_model = query.shape
+        _, num_vars, _ = key.shape
+        
+        # Calculate attention scores: [batch_size, seq_len, num_vars]
+        attention_scores = torch.matmul(query, key.transpose(-1, -2)) / (d_model ** 0.5)
+        
+        # Apply padding masks if provided
+        if query_mask is not None or key_mask is not None:
+            # 创建attention mask: [batch_size, seq_len, num_vars]
+            if query_mask is not None:
+                query_mask_expanded = query_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+            else:
+                query_mask_expanded = torch.ones(batch_size, seq_len, 1, dtype=torch.bool, device=query.device)
+            
+            if key_mask is not None:
+                key_mask_expanded = key_mask.unsqueeze(1)  # [batch_size, 1, num_vars]
+            else:
+                key_mask_expanded = torch.ones(batch_size, 1, num_vars, dtype=torch.bool, device=query.device)
+            
+            # 只有当query和key都不是padding时，attention score才有效
+            attention_mask = query_mask_expanded & key_mask_expanded  # [batch_size, seq_len, num_vars]
+            
+            # Apply mask
+            attention_scores = attention_scores.masked_fill(attention_mask, float('-inf'))
+        
+        # Apply softmax to get attention weights
+        attention_weights = F.softmax(attention_scores, dim=-1)
+        
+        # Apply attention weights to values
+        attended_output = torch.matmul(attention_weights, value)
+        
+        return attended_output, attention_weights
+
+    def get_select_node_decision(self, states_embd, sequence_tensor, type_tensor, cand_tensor,node_id_tensor,branch_label_tensor,\
+                                    branch_action_tensor,select_action_tensor,select_label_tensor):
+        with torch.no_grad():  # 用于推理但不训练
+            sequence_embd,_ = self.get_inference_sequence_embd(states_embd, sequence_tensor, type_tensor, branch_action_tensor, sequence_tensor.device)
+            sequence_embd = self.transformer(sequence_embd)
+            select_logits = self.deal_select(sequence_embd, None, states_embd.unsqueeze(0), None)
+
+            select_logits = select_logits.squeeze(-1)
+            mask = node_id_tensor == -1
+            select_logits = select_logits.masked_fill(mask, float('-inf'))
+            
+            # 根据select_logits的大小对node_id_tensor排序（从大到小）
+            sorted_indices = torch.argsort(select_logits, descending=False)
+            sorted_node_ids = node_id_tensor[sorted_indices]
+
+            # 将tensor转换为list
+            sorted_node_ids_list = sorted_node_ids.squeeze(0).tolist()
+        
+        return sorted_node_ids_list
+        
+    def get_branch_var_decision(self, state_embd, sequence_tensor, types, node_id):
+
+        with torch.no_grad():  # 用于推理但不训练
+            _, sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
+            sequence_embd = self.transformer(sequence_embd)
+            branch_logits = self.deal_branch(sequence_embd, None, state_embd.unsqueeze(0), None)
+
+        return branch_logits
+
+    def get_inference_sequence_embd(self,states_embd, sequence_tensor, type_tensor, branch_action_tensor,device):
+
+        select_sequence_embd, branch_sequence_embd = self.combine_sequence_embd(sequence_tensor.unsqueeze(0), sequence_tensor.unsqueeze(0), type_tensor.unsqueeze(0), states_embd.unsqueeze(0), branch_action_tensor.unsqueeze(0), device)
+
+        return select_sequence_embd,branch_sequence_embd
+
+    def print_model_info(self):
+        """
+        打印模型的参数量信息
+        """
+        total_params = sum(p.numel() for p in self.parameters())
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        
+        print(f"=" * 50)
+        print(f"DTModel 参数统计:")
+        print(f"总参数量: {total_params:,}")
+        print(f"可训练参数量: {trainable_params:,}")
+        print(f"模型大小: {total_params * 4 / 1024 / 1024:.2f} MB (假设float32)")
+        print(f"=" * 50)
+        
+        # 详细打印每个模块的参数量
+        print(f"\n详细参数分布:")
+        for name, module in self.named_modules():
+            if len(list(module.children())) == 0:  # 只打印叶子模块
+                params = sum(p.numel() for p in module.parameters())
+                if params > 0:
+                    print(f"{name}: {params:,} 参数")
+        
+        return total_params, trainable_params

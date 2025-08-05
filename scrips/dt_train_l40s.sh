@@ -27,4 +27,4 @@ export NVCC_APPEND_FLAGS="-allow-unsupported-compiler"
 # python node_selection/behaviour_gen.py -n_cpu 20
 
 # 使用DeepSpeed启动多GPU训练，明确指定GPU设备
-deepspeed learning/dt_train_ds.py  
+deepspeed learning/ds_train.py  

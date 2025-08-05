@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from dt_dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
-from dt_model import DTModel
+from dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
+from model import DTModel
 import time
 import deepspeed
 import os
@@ -15,7 +15,7 @@ import yaml
                           
 def train():
 
-    with open('./learning/dt_train_ds.yaml', 'r') as f:
+    with open('./learning/ds_train.yaml', 'r') as f:
         config = yaml.safe_load(f)
 
     batch_size = config['batch_size']
@@ -38,7 +38,7 @@ def train():
             "enabled": False
         },
         "zero_optimization": {
-            "stage": 2,
+            "stage": 1,
             # "offload_optimizer": {
             #     "device": "cpu"
             # }
@@ -208,6 +208,11 @@ def train():
                 model_path = os.path.join(save_dir, f'best_select_model-{epoch}.pt')
                 torch.save(model_engine.module.state_dict(), model_path)
                 print(f"保存最佳模型 (epoch {epoch}, select_top1: {avg_valid_select_top1:.4f}) 到: {model_path}")
+            if avg_valid_branch_top1 > best_branch_top1 and save_dir is not None:
+                best_branch_top1 = avg_valid_branch_top1
+                model_path = os.path.join(save_dir, f'best_branch_model-{epoch}.pt')
+                torch.save(model_engine.module.state_dict(), model_path)
+                print(f"保存最佳模型 (epoch {epoch}, branch_top1: {avg_valid_branch_top1:.4f}) 到: {model_path}")
 
     # 关闭TensorBoard writer（只在主进程）
     if model_engine.global_rank == 0 and writer is not None:

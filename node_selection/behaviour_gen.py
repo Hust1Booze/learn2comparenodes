@@ -9,12 +9,14 @@ from pathlib import Path
 from recorders import LPFeatureRecorder, CompFeaturizer, CompFeaturizerSVM
 import time
 from brancher import StrongBranchingRule
-from selector import OracleNodeSelRecorder, ScipEvent
+from selector import OracleNodeSelRecorder
+from utiles import ScipEvent
 from saver import SequenceSaver
 from torch.multiprocessing import Process, set_start_method
 from functools import partial
+import yaml
 
-def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_model):
+def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_model, random_branching_prob):
     
     model = sp.Model()
     model.hideOutput()      
@@ -29,43 +31,43 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     model.setParam('constraints/linear/upgrade/setppc', 0)
     model.setParam('constraints/linear/upgrade/xor', 0)
     model.setParam('constraints/linear/upgrade/varbound', 0)
-
     # this set to avoid SETCOVER muti restart
-    #model.setParam("presolving/maxrestarts", 0)
+    model.setParam("presolving/maxrestarts", 0)
 
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
 
+    # init saver
     save_dir = save_dir + '/' + str(instance).split("/")[-1] + f"_{int(time.time())}"
     sequence_saver = SequenceSaver(save_dir)
 
+    # include selector
     comp_behaviour_saver = CompFeaturizer(f"{save_dir}", instance_name=str(instance).split("/")[-1])
     comp_behaviour_saver_svm = CompFeaturizerSVM(model, f"{save_dir_svm}", instance_name=str(instance).split("/")[-1])
-    
     oracle_ns = OracleNodeSelRecorder(oracle_type, comp_behaviour_saver, comp_behaviour_saver_svm, sequence_saver, save_dir)
     oracle_ns.setOptsol(optsol)
     oracle_ns.set_LP_feature_recorder(LPFeatureRecorder(model, device))
-        
+    model.includeNodesel(oracle_ns, "oracle_recorder", "testing", 536870911,  536870911)
     
-    model.includeNodesel(oracle_ns, "oracle_recorder", "testing",
-                         536870911,  536870911)
-    
+    # include eventor
     scipEvent = ScipEvent(model,sequence_saver,device)
     model.includeEventhdlr(scipEvent, "ScipEvent", "Event handler when nodes are pouned")
 
-    # brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=True, random_branching_prob=0)
-    # model.includeBranchrule(
-    # branchrule=brancher,
-    # name="BNB_Brancher",
-    # desc="custom BNB_Brancher",
-    # priority=666666, maxdepth=-1, maxbounddist=1)
+    # include brancher
+    brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=True, random_branching_prob=random_branching_prob)
+    model.includeBranchrule(
+        branchrule=brancher,
+        name="BNB_Brancher",
+        desc="custom BNB_Brancher",
+        priority=666666, maxdepth=-1, maxbounddist=1
+    )
 
     # Run the optimizer
     model.optimize()
     objval = model.getObjVal()
     sequence_saver.save()
 
-    print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time, objval:{objval}' )
-    
+    print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + \
+          f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time, objval:{objval}' )
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")
         f.close()
@@ -76,11 +78,11 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     return 1
 
 
-def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device,debug_model):
+def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device,debug_model,random_branching_prob):
     
     for instance in instances:
         print(f'dealing {instance}', flush= True)      
-        run_episode(oracle_type, instance, save_dir, save_dir_svm, device,debug_model)
+        run_episode(oracle_type, instance, save_dir, save_dir_svm, device,debug_model,random_branching_prob)
         print(f'done {instance}\n', flush= True)  
         
     print("finished running episodes for process")
@@ -103,29 +105,23 @@ def distribute(n_instance, n_cpu):
 
 if __name__ == "__main__":
     
-    oracle = 'optimal_plunger'
-    problem = 'GISP' #'GISP'
-    data_partitions = ['train','valid'] #dont change
-    n_cpu = 1
-    n_instance = 100
-    device = 'cpu'
-    debug_model = 0
-    
-    #Initializing the model 
-    for i in range(1, len(sys.argv), 2):
-        if sys.argv[i] == '-oracle':
-            oracle = str(sys.argv[i + 1])
-        if sys.argv[i] == '-problem':
-            problem = str(sys.argv[i + 1])
-        if sys.argv[i] == '-n_cpu':
-            n_cpu = int(sys.argv[i + 1])
-        if sys.argv[i] == '-n_instance':
-            n_instance = int(sys.argv[i + 1])
-        if sys.argv[i] == '-device':
-            device = str(sys.argv[i + 1])
-        if sys.argv[i] == '-debug_model':
-            debug_model = int(sys.argv[i + 1])
-   
+    with open('./node_selection/behaviour_gen.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    # print info
+    print('\n\n\n')
+    print(f'~'*80)
+    print(f'Config:\n{config}')
+    print(f'~'*80)
+
+
+    oracle = config['oracle']
+    problem = config['problem']
+    data_partitions = config['data_partitions']
+    n_cpu = config['n_cpu']
+    n_instance = config['n_instance']
+    device = config['device']
+    debug_model = config['debug_model']
+    random_branching_prob = config['random_branching_prob']
    
   
     for data_partition in data_partitions:
@@ -163,7 +159,8 @@ if __name__ == "__main__":
                                                         save_dir=save_dir,
                                                         save_dir_svm=save_dir_svm,
                                                         device=device,
-                                                        debug_model=debug_model))
+                                                        debug_model=debug_model,
+                                                        random_branching_prob=random_branching_prob))
                         for p,(p1,p2) in enumerate(distribute(len(instances), n_cpu))]
         
         
