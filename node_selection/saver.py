@@ -1,9 +1,12 @@
 import torch
 import os
+import datetime
 
 class SequenceSaver():
     def __init__(self, save_path) -> None:
-        self.save_path = save_path
+        # 添加时间戳到保存路径
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        self.save_path = f"{save_path}_{timestamp}"
         self.milp_state = None
         self.squence = []
 

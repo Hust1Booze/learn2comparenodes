@@ -34,6 +34,10 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     # this set to avoid SETCOVER muti restart
     model.setParam("presolving/maxrestarts", 0)
 
+    model.setIntParam('randomization/permutationseed', 0)
+    model.setIntParam('randomization/randomseedshift',0)
+    
+
     optsol = model.readSolFile(instance.replace(".lp", ".sol"))
 
     # init saver
@@ -53,7 +57,7 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     model.includeEventhdlr(scipEvent, "ScipEvent", "Event handler when nodes are pouned")
 
     # include brancher
-    brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=True, random_branching_prob=random_branching_prob)
+    brancher = StrongBranchingRule(model,sequence_saver,save_dir, use_gasse_representation=False, random_branching_prob=random_branching_prob)
     model.includeBranchrule(
         branchrule=brancher,
         name="BNB_Brancher",

@@ -543,7 +543,7 @@ if __name__ == '__main__':
         denss = []
 
         # train instances
-        n = 1000
+        n = 10000
         lp_dir = f'./data/setcover/train_{nrows}r_{ncols}c_{dens}d'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)

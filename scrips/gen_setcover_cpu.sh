@@ -3,7 +3,7 @@
 #SBATCH --partition=cpu
 #SBATCH -J gen_data
 #SBATCH -n 1             
-#SBATCH --cpus-per-task=20   # 每节点核数
+#SBATCH --cpus-per-task=50   # 每节点核数
 #SBATCH --qos=cpu     
 
 
@@ -13,13 +13,20 @@ source activate bnb
 root_dir=$(pwd)
 echo "root_dir:"${root_dir}
 
+#python problem_generation/gen_branch_problem.py setcover
+#python problem_generation/solve.py -data_partition train -n_cpu 50
+python node_selection/behaviour_gen.py
 
 # python problem_generation/gisp.py -data_partition train -n_instance 1000 -n_cpu 20
 # python problem_generation/gisp.py -data_partition valid -n_instance 100 -n_cpu 20
 
-python problem_generation/solve.py -data_partition train -n_cpu 20
-python problem_generation/solve.py -data_partition valid -n_cpu 20
-python node_selection/behaviour_gen.py -n_cpu 20
+# python problem_generation/solve.py -data_partition train -n_cpu 20
+# python problem_generation/solve.py -data_partition valid -n_cpu 20
+
+# python problem_generation/solve.py -data_partition train -n_cpu 20
+# python problem_generation/solve.py -data_partition valid -n_cpu 20
+# python node_selection/behaviour_gen.py
+
 
 # python node_selection/behaviour_gen.py |tee logs/gen_new_data_2.txt
 

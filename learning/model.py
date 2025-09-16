@@ -6,13 +6,13 @@ from gnn_encoder import GNNEncoder
 
 
 class DTModel(nn.Module):
-    def __init__(self,d_model=32, n_heads=4, n_layers=2, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
+    def __init__(self,d_model=32, n_heads=2, n_layers=1, dropout=0.1, type_vocab_size=6, temperature = 1000.0, use_soft_score_label = False):
         super().__init__()
         self.d_model = d_model  # 保存d_model参数
         self.token_proj = nn.Linear(13, d_model)  # project all input tokens to d_model dim
         self.type_embedding = nn.Embedding(type_vocab_size, d_model, padding_idx=0)
         self.pos_embedding = nn.Embedding(10000, d_model) # support 10000 sequence length 
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout,dim_feedforward =128, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, dropout=dropout,dim_feedforward =64, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
         self.max_nodes = 10000
         self.max_vars = 10000
@@ -173,6 +173,25 @@ class DTModel(nn.Module):
 
         return select_sequence_embd,branch_sequence_embd
     
+    def combine_sequence_embd_only_selector(self, select_sequences, types, device):
+        select_sequence_embd = self.token_proj(select_sequences)
+
+        types_embd = self.type_embedding(types)
+
+        # 创建position embedding
+        batch_size, select_seq_len, _ = select_sequence_embd.shape
+        
+        # 创建position indices
+        select_positions = torch.arange(select_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+        
+        # 获取position embeddings
+        select_pos_embd = self.pos_embedding(select_positions)
+
+        # 组合所有embeddings: token + type + position
+        select_sequence_embd = select_sequence_embd + types_embd[:,:select_sequence_embd.shape[1],:] + select_pos_embd
+
+        return select_sequence_embd
+
     def combine_sequence_embd_old_version(self,select_sequences, branch_sequences, types, device):
         select_sequence_embd = self.token_proj(select_sequences)
         branch_sequence_embd = self.token_proj(branch_sequences)
@@ -394,7 +413,9 @@ class DTModel(nn.Module):
     def get_select_node_decision(self, states_embd, sequence_tensor, type_tensor, cand_tensor,node_id_tensor,branch_label_tensor,\
                                     branch_action_tensor,select_action_tensor,select_label_tensor):
         with torch.no_grad():  # 用于推理但不训练
-            sequence_embd,_ = self.get_inference_sequence_embd(states_embd, sequence_tensor, type_tensor, branch_action_tensor, sequence_tensor.device)
+            #sequence_embd,_ = self.get_inference_sequence_embd(states_embd, sequence_tensor, type_tensor, branch_action_tensor, sequence_tensor.device)
+
+            sequence_embd = self.combine_sequence_embd_only_selector(sequence_tensor.unsqueeze(0), type_tensor.unsqueeze(0), sequence_tensor.device)
             sequence_embd = self.transformer(sequence_embd)
             select_logits = self.deal_select(sequence_embd, None, states_embd.unsqueeze(0), None)
 

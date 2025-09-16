@@ -13,7 +13,7 @@ import torch
 import time
 from pyscipopt.scip import Nodesel
 
-from learning.model import DTModel
+from model import DTModel
 import re
 from recorders_debug import LPFeatureRecorder,CompFeaturizer
 

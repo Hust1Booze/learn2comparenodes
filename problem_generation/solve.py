@@ -54,7 +54,7 @@ if __name__ == "__main__":
     problem = 'SETCOVER'
     timelimit = 7200.0
     solveInstance = True
-    n_instance = 1000
+    n_instance = 10000
     seed = 0
     
 

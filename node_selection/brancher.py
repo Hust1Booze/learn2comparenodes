@@ -41,13 +41,13 @@ class StrongBranchingRule(sp.Branchrule):
 
         _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
         node_number = self.model.getCurrentNode().getNumber()
-        # if node_number == 1 and self.use_gasse_representation:
-        #     self.converse_to_gasse_representation()
-            
 
         branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.scip.getLPBranchCands()
 
         action_set = [c.getCol().getLPPos() for c in branch_cands]
+        if len(_col_features) != len(branch_cands):
+            print(f'col features of branch_cands is not equal to action_set')
+
         cands_LP_features = [_col_features[i] for i in action_set]
         # Initialise scores for each variable
         scores = [-self.scip.infinity() for _ in range(npriocands)]

@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -o job.%j.out
-#SBATCH --partition=l40s
-#SBATCH -J dt_bnb
+#SBATCH -o learning/job.%j.out
+#SBATCH --partition=a100
+#SBATCH -J ds_bnb
 #SBATCH -N 1
-#SBATCH --ntasks-per-node=4   
+#SBATCH --ntasks-per-node=4
 #SBATCH --gres=gpu:4
-#SBATCH --qos=dcgpu
+#SBATCH --qos=a100
 
 nvidia-smi
 # module load cuda/11.8

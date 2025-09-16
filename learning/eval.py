@@ -28,7 +28,7 @@ from torch.multiprocessing import Process, set_start_method
 import torch
 import time
 from pyscipopt.scip import Nodesel
-from learning.model import DTModel
+from model import DTModel
 import re
 from recorders_debug import LPFeatureRecorder,CompFeaturizer
 
@@ -63,7 +63,7 @@ def run_episode(oracle_type, instance,  save_dir, save_dir_svm, device, debug_mo
 
     comb_model = DTModel()
     #comb_model.load_state_dict(torch.load("models/train_Jul13_14-43/best_select_model-2300.pt"))
-    state_dict = torch.load('models/train_Jul23_20-14/best_select_model-12400.pt', map_location=torch.device('cpu'))
+    state_dict = torch.load('/lab/shiyh_lab/12332470/code/bnb_gasses/learn2comparenodes/models/train_Sep10_12-06/best_select_model-19800.pt', map_location=torch.device('cpu'))
     comb_model.load_state_dict(state_dict)
     comb_model.eval()
 

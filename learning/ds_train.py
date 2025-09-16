@@ -11,12 +11,24 @@ from torch.utils.tensorboard import SummaryWriter
 import datetime
 import numpy as np
 import yaml
-# CUDA_VISIBLE_DEVICES = int(os.environ[“LOCAL_RANK”])
+import random
+# CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"])
                           
 def train():
-
     with open('./learning/ds_train.yaml', 'r') as f:
         config = yaml.safe_load(f)
+
+    # 设置随机种子以确保实验可重复性
+    seed = config.get('seed', 42)  # 从配置文件读取seed，默认为42
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # 如果使用多GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    print(f"Random seed set to: {seed}")
 
     batch_size = config['batch_size']
     problem = config['problem']
@@ -24,6 +36,7 @@ def train():
     select_loss_weight = config['select_loss_weight']
     branch_loss_weight = config['branch_loss_weight']
     lr = config['lr']
+
 
     ds_config = {
         "train_micro_batch_size_per_gpu": batch_size,

@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH -o job.%j.out
-#SBATCH --partition=v100
-#SBATCH -J dt_bnb
+#SBATCH --partition=l40s
+#SBATCH -J ds_bnb
 #SBATCH -N 1
-#SBATCH --ntasks-per-node=4
+#SBATCH --ntasks-per-node=4   
 #SBATCH --gres=gpu:4
 #SBATCH --qos=dcgpu
 
@@ -27,5 +27,4 @@ export NVCC_APPEND_FLAGS="-allow-unsupported-compiler"
 # python node_selection/behaviour_gen.py -n_cpu 20
 
 # 使用DeepSpeed启动多GPU训练，明确指定GPU设备
-deepspeed learning/dt_train_ds.py  
-
+deepspeed learning/ds_train.py  
