@@ -47,6 +47,14 @@ class DTModel(nn.Module):
             nn.Linear(d_model // 2, 1)
         )
 
+        self.branch_head_only_lp_features = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, 1)
+        )
+
     
     def forward(self, states, sequence_data, device):
         
@@ -74,7 +82,17 @@ class DTModel(nn.Module):
         node_id_masks = sequence_data["node_id_masks"].to(device)
 
 
-
+        branch_loss = torch.tensor(0.0, device=device)
+        select_loss = torch.tensor(0.0, device=device)
+        branch_top1 = 0.0
+        branch_top5 = 0.0
+        branch_top10 = 0.0
+        select_top1 = 0.0
+        select_top5 = 0.0
+        select_top10 = 0.0
+        
+        branch_loss, branch_top1, branch_top5, branch_top10 = self.only_branch_lp_features(branch_lp_features, branch_cands, branch_labels)
+        return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
 
         states_embd, states_mask = self.deal_states(states, device)
         
@@ -86,16 +104,22 @@ class DTModel(nn.Module):
         # select_sequence_embd = self.xformers_self_attention(_select_sequence_embd, key_padding_mask=select_sequence_masks)
         # branch_sequence_embd = self.xformers_self_attention(_branch_sequence_embd, key_padding_mask=branch_sequence_masks)
 
-        select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
-        branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask, branch_lp_features, branch_cands)
 
-        # cal branch loss
+        branch_logits = self.deal_branch(branch_sequence_embd, branch_sequence_masks, states_embd, states_mask, branch_lp_features, branch_cands)
         branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
+
+        select_logits = self.deal_select(select_sequence_embd, select_sequence_masks, states_embd, states_mask)
         select_loss, select_top1, select_top5, select_top10 = self.cal_select_loss(select_logits, select_cands, select_labels, node_ids)
 
         return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
     
-
+    
+    def only_branch_lp_features(self, branch_lp_features, branch_cands, branch_labels):
+        _branch_lp_features = self.lp_embedding(branch_lp_features)
+        branch_logits = self.branch_head_only_lp_features(_branch_lp_features)
+        branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
+        return branch_loss, branch_top1, branch_top5, branch_top10
+    
     def deal_states(self, states, device):
         max_state_emb_len = 0
         states_emb = []
@@ -229,35 +253,38 @@ class DTModel(nn.Module):
             branch_logits: [batch_size,num_vars, 1]
         """
         
-        attended_output, attention_weights = \
-            self.cross_attention(states_embd, branch_sequence_embd, branch_sequence_embd, states_mask, branch_sequence_masks)
-        
-        combine_branch_embd = torch.cat([states_embd, attended_output], dim=-1) #[batch, numvars, d_model*2]
+        use_attention = False
+        if use_attention:
+            attended_output, attention_weights = \
+                self.cross_attention(states_embd, branch_sequence_embd, branch_sequence_embd, states_mask, branch_sequence_masks)
+            
+            combine_branch_embd = torch.cat([states_embd, attended_output], dim=-1) #[batch, numvars, d_model*2]
 
-        branch_lp_features = self.lp_embedding(branch_lp_features)
-        # 将branch_lp_features添加到combine_branch_embd中
-        # 处理branch_actions中的-1 padding值
-        batch_size, seq_len = branch_actions.shape
-        valid_mask = branch_actions != -1  # [batch_size, seq_len]
-        
-        # 创建结果tensor，初始化为零
-        result_tensor = torch.zeros(batch_size, seq_len, combine_branch_embd.shape[-1], 
-                                  device=combine_branch_embd.device, dtype=combine_branch_embd.dtype)
-        
-        # 只对有效位置进行索引
-        for batch_idx in range(batch_size):
-            valid_indices = valid_mask[batch_idx]  # [seq_len]
-            if valid_indices.any():
-                valid_actions = branch_actions[batch_idx][valid_indices]  # 获取有效的action索引
-                valid_features = combine_branch_embd[batch_idx][valid_actions]  # 获取对应的特征
-                result_tensor[batch_idx][valid_indices] = valid_features
-        
-        # 将branch_lp_features与结果tensor拼接
-        combine_branch_embd = torch.cat([result_tensor, branch_lp_features], dim=-1)
+            branch_lp_features = self.lp_embedding(branch_lp_features)
+            # 将branch_lp_features添加到combine_branch_embd中
+            # 处理branch_actions中的-1 padding值
+            batch_size, seq_len = branch_actions.shape
+            valid_mask = branch_actions != -1  # [batch_size, seq_len]
+            
+            # 创建结果tensor，初始化为零
+            result_tensor = torch.zeros(batch_size, seq_len, combine_branch_embd.shape[-1], 
+                                    device=combine_branch_embd.device, dtype=combine_branch_embd.dtype)
+            
+            # 只对有效位置进行索引
+            for batch_idx in range(batch_size):
+                valid_indices = valid_mask[batch_idx]  # [seq_len]
+                if valid_indices.any():
+                    valid_actions = branch_actions[batch_idx][valid_indices]  # 获取有效的action索引
+                    valid_features = combine_branch_embd[batch_idx][valid_actions]  # 获取对应的特征
+                    result_tensor[batch_idx][valid_indices] = valid_features
+            
+            # 将branch_lp_features与结果tensor拼接
+            combine_branch_embd = torch.cat([result_tensor, branch_lp_features], dim=-1)
 
-        branch_logits = self.branch_head(combine_branch_embd)
+        #branch_logits = self.branch_head(combine_branch_embd)
+        branch_logits = self.branch_head_only_lp_features(branch_lp_features)
 
-        return branch_logits 
+        return branch_logits  
 
 
     def deal_select(self, select_sequence_embd, select_sequence_masks, states_embd, states_mask):
@@ -294,18 +321,14 @@ class DTModel(nn.Module):
             branch_loss: scalar - branch loss
         """
         branch_logits = branch_logits.squeeze(-1)
-        # 创建mask：True表示需要mask的位置（无效candidate），False表示有效candidate
-        candidate_mask = branch_cands == -1
-        # 将无效candidate位置的logits设为-inf
-        masked_logits = branch_logits.masked_fill(candidate_mask, float('-inf'))
 
         # labels 就表示label在cands中的位置
         target = branch_labels.to(branch_logits.device)     
         # 计算交叉熵损失
-        loss = F.cross_entropy(masked_logits, target, reduction='none')  # [batch_size]
+        loss = F.cross_entropy(branch_logits, target, reduction='none')  # [batch_size]
         
         # 计算top1, top5, top10准确率
-        _, top_indices = masked_logits.topk(k=10, dim=-1)  # [batch_size, 10]
+        _, top_indices = branch_logits.topk(k=10, dim=-1)  # [batch_size, 10]
         
         # 检查top1是否包含标签
         top1_correct = (top_indices[:, 0] == target).float().mean().item()
@@ -383,28 +406,28 @@ class DTModel(nn.Module):
         # Calculate attention scores: [batch_size, seq_len, num_vars]
         attention_scores = torch.matmul(query, key.transpose(-1, -2)) / (d_model ** 0.5)
         
-        # Apply padding masks if provided
-        if query_mask is not None or key_mask is not None:
-            # 创建attention mask: [batch_size, seq_len, num_vars]
-            if query_mask is not None:
-                query_mask_expanded = query_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
-            else:
-                query_mask_expanded = torch.ones(batch_size, seq_len, 1, dtype=torch.bool, device=query.device)
-            
-            if key_mask is not None:
-                key_mask_expanded = key_mask.unsqueeze(1)  # [batch_size, 1, num_vars]
-            else:
-                key_mask_expanded = torch.ones(batch_size, 1, num_vars, dtype=torch.bool, device=query.device)
-            
-            # 只有当query和key都不是padding时，attention score才有效
-            attention_mask = query_mask_expanded & key_mask_expanded  # [batch_size, seq_len, num_vars]
-            
-            # Apply mask
-            attention_scores = attention_scores.masked_fill(attention_mask, float('-inf'))
-        
+        # Key padding mask (True=padding). Only mask keys before softmax
+        if key_mask is not None:
+            key_mask_expanded = key_mask.unsqueeze(1)  # [batch_size, 1, num_vars]
+        else:
+            key_mask_expanded = torch.zeros(batch_size, 1, num_vars, dtype=torch.bool, device=query.device)
+
+        attention_scores = attention_scores.masked_fill(key_mask_expanded, float('-inf'))
+
         # Apply softmax to get attention weights
         attention_weights = F.softmax(attention_scores, dim=-1)
-        
+
+        # Guard against rows with all -inf (can produce NaNs)
+        attention_weights = torch.nan_to_num(attention_weights, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # For padding queries (True=padding), zero out the entire row after softmax
+        if query_mask is not None:
+            query_mask_expanded = query_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+        else:
+            query_mask_expanded = torch.zeros(batch_size, seq_len, 1, dtype=torch.bool, device=query.device)
+
+        attention_weights = attention_weights.masked_fill(query_mask_expanded, 0.0)
+
         # Apply attention weights to values
         attended_output = torch.matmul(attention_weights, value)
         
@@ -435,13 +458,13 @@ class DTModel(nn.Module):
     def get_branch_var_decision(self, state_embd, sequence_tensor, types, node_id):
 
         with torch.no_grad():  # 用于推理但不训练
-            _, sequence_embd = self.get_inference_sequence_embd(sequence_tensor, types, node_id, sequence_tensor.device)
+            _, sequence_embd = self.get_inference_sequence_embd(state_embd, sequence_tensor, types, node_id, sequence_tensor.device)
             sequence_embd = self.transformer(sequence_embd)
             branch_logits = self.deal_branch(sequence_embd, None, state_embd.unsqueeze(0), None)
 
         return branch_logits
 
-    def get_inference_sequence_embd(self,states_embd, sequence_tensor, type_tensor, branch_action_tensor,device):
+    def get_inference_sequence_embd(self,states_embd, sequence_tensor, type_tensor, branch_action_tensor, device):
 
         select_sequence_embd, branch_sequence_embd = self.combine_sequence_embd(sequence_tensor.unsqueeze(0), sequence_tensor.unsqueeze(0), type_tensor.unsqueeze(0), states_embd.unsqueeze(0), branch_action_tensor.unsqueeze(0), device)
 

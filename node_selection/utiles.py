@@ -161,3 +161,30 @@ def relPosition(node_bound, ub, lb):
         return 0 
     else:
         return np.abs(ub - node_bound) / np.abs(ub -lb)
+
+
+def extract_khalil_variable_features(model, candidates, root_buffer):
+    """
+    Extract features following Khalil et al. (2016) Learning to Branch in Mixed Integer Programming.
+
+    Parameters
+    ----------
+    model : pyscipopt.scip.Model
+        The current model.
+    candidates : list of pyscipopt.scip.Variable's
+        A list of variables for which to compute the variable features.
+    root_buffer : dict
+        A buffer to avoid re-extracting redundant root node information (None to deactivate buffering).
+
+    Returns
+    -------
+    variable_features : 2D np.ndarray
+        The features associated with the candidate variables.
+    """
+    # update state from state_buffer if any
+    scip_state = model.getKhalilState(root_buffer, candidates)
+
+    variable_feature_names = sorted(scip_state)
+    variable_features = np.stack([scip_state[feature_name] for feature_name in variable_feature_names], axis=1)
+
+    return variable_features

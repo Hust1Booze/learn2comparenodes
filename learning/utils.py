@@ -8,7 +8,7 @@ Created on Fri Feb  4 10:04:12 2022
 
 import torch
 import torch_geometric
-
+import numpy as np
 def normalize_graph(constraint_features, 
                     edge_index,
                     edge_attr,
@@ -157,4 +157,7 @@ def process_ranknet(policy, X, y, loss_fct, device, optimizer=None):
     mean_loss /= (n_samples_processed + ( n_samples_processed == 0))
     mean_acc /= (n_samples_processed  + ( n_samples_processed == 0))
     return mean_loss, mean_acc
+
+
+
 

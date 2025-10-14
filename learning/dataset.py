@@ -160,6 +160,24 @@ def simple_collate_fn(batch):
         else:
             padded_branch_lp_features = torch.full((max_branch_lp_features,), 0, dtype=branch_lp_feature.dtype)
         padded_branch_lp_features[:branch_lp_features_len] = branch_lp_feature
+        # query-based normalization in [0, 1] on valid region (exclude padding)
+        if len(branch_lp_feature.shape) > 1:
+            valid = padded_branch_lp_features[:branch_lp_features_len, :]
+            min_vals = valid.amin(dim=0, keepdim=True)
+            valid = valid - min_vals
+            max_vals = valid.amax(dim=0, keepdim=True)
+            max_vals[max_vals == 0] = 1
+            valid = valid / max_vals
+            padded_branch_lp_features[:branch_lp_features_len, :] = valid
+        else:
+            valid = padded_branch_lp_features[:branch_lp_features_len]
+            min_val = valid.min()
+            valid = valid - min_val
+            max_val = valid.max()
+            if max_val == 0:
+                max_val = torch.tensor(1, dtype=valid.dtype, device=valid.device)
+            valid = valid / max_val
+            padded_branch_lp_features[:branch_lp_features_len] = valid
         padded_branch_lp_features_list.append(padded_branch_lp_features)
 
     # 堆叠所有tensor

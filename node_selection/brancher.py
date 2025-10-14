@@ -6,6 +6,7 @@ import pyscipopt.scip as sp
 from pyscipopt import SCIP_EVENTTYPE,Eventhdlr,SCIP_RESULT
 import torch
 import time
+import utiles
 
 
 class Brancher(sp.Branchrule):
@@ -37,7 +38,15 @@ class StrongBranchingRule(sp.Branchrule):
         self.original_conss = original_conss
         self.var2idx = dict([ (str_var, idx) for idx, var in enumerate(self.varrs) for str_var in [str(var)]  ])
 
+        self.khalil_root_buffer = {}
+
     def branchexeclp(self, allowaddcons):
+
+        if self.model.getNNodes() == 1:
+            # initialize root buffer for Khalil features extraction
+            utiles.extract_khalil_variable_features(self.model, [], self.khalil_root_buffer)
+        cands, *_ = self.model.getPseudoBranchCands()
+        state_khalil = utiles.extract_khalil_variable_features(self.model, cands, self.khalil_root_buffer)
 
         _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
         node_number = self.model.getCurrentNode().getNumber()

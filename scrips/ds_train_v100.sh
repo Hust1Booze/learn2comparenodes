@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -o job.%j.out
+#SBATCH -o learning/logs/job.%j.out
 #SBATCH --partition=v100
 #SBATCH -J ds_bnb
 #SBATCH -N 1

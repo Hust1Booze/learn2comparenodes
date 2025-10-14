@@ -1,8 +1,8 @@
-batch_size : 16
+batch_size : 256
 problem : "GISP"
 
-select_loss_weight : 1.0
-branch_loss_weight : 0.0
+select_loss_weight : 0.0
+branch_loss_weight : 1.0
 
 lr : 0.0005
 
