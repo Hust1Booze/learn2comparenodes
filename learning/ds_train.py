@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from dataset import BnBSequentialDataset, calculate_average_reward_static, simple_collate_fn
+from dataset import BnBSequentialDataset, collate_fn
 from model import DTModel
 import time
 import deepspeed
@@ -95,8 +95,8 @@ def train():
     
 
     # DataLoader的batch_size应该等于DeepSpeed配置中的train_micro_batch_size_per_gpu
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, collate_fn=simple_collate_fn)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     
     for epoch in range(100000):
         model_engine.train()
@@ -113,9 +113,8 @@ def train():
         start_time = time.time()
 
         for batch in dataloader:
-            states, sequence_data = batch
             # 前向传播
-            branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model_engine(states, sequence_data, model_engine.device)
+            branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model_engine(batch, model_engine.device)
 
             total_loss = select_loss*select_loss_weight + branch_loss*branch_loss_weight
 
@@ -178,9 +177,8 @@ def train():
             valid_branch_top10 = []
             for i in range(10):
                 for batch in valid_dataloader:
-                    states, sequence_data = batch
                     # 前向传播
-                    branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model_engine(states, sequence_data, model_engine.device)
+                    branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model_engine(batch, model_engine.device)
 
                     valid_select_loss += select_loss.item()
                     valid_branch_loss += branch_loss.item()

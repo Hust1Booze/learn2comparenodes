@@ -1,10 +1,11 @@
 #!/bin/bash
-#SBATCH -o job.%j.out
-#SBATCH --partition=cpu
+#SBATCH -o node_selection/job.%j.out
 #SBATCH -J gen_data
-#SBATCH -n 1                 # 总核数 40
-#SBATCH --ntasks-per-node=20   # 每节点核数
-#SBATCH --qos=cpu     
+#SBATCH --partition=cpu
+#SBATCH --qos=cpu
+#SBATCH -N 1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=20
 
 
 # this shell use CPU and just validate one checkpoint

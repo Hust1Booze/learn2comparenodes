@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from gnn_encoder import GNNEncoder
+import random
 # from xformers.ops import memory_efficient_attention
 
 
@@ -56,32 +57,8 @@ class DTModel(nn.Module):
         )
 
     
-    def forward(self, states, sequence_data, device):
+    def forward(self, batch, device):
         
-        select_loss = torch.tensor(0.0, device=device)
-        branch_loss = torch.tensor(0.0, device=device)
-        select_steps = 0
-        branch_steps = 0
-        select_corrects = 0
-        branch_corrects = 0
-
-        select_sequences = sequence_data["select_sequences"].to(device)
-        branch_sequences = sequence_data["branch_sequences"].to(device)
-        select_cands = sequence_data["select_cands"].to(device)
-        branch_cands = sequence_data["branch_cands"].to(device)
-        node_ids = sequence_data["node_ids"].to(device)
-        types = sequence_data["types"].to(device)
-        select_labels = sequence_data["select_labels"]
-        branch_labels = sequence_data["branch_labels"]
-        branch_actions = sequence_data["branch_actions"].to(device)
-        branch_lp_features = sequence_data["branch_lp_features"].to(device)
-        select_sequence_masks = sequence_data["select_sequence_masks"].to(device)
-        branch_sequence_masks = sequence_data["branch_sequence_masks"].to(device)
-        select_cand_masks = sequence_data["select_cand_masks"].to(device)
-        branch_cand_masks = sequence_data["branch_cand_masks"].to(device)
-        node_id_masks = sequence_data["node_id_masks"].to(device)
-
-
         branch_loss = torch.tensor(0.0, device=device)
         select_loss = torch.tensor(0.0, device=device)
         branch_top1 = 0.0
@@ -90,7 +67,45 @@ class DTModel(nn.Module):
         select_top1 = 0.0
         select_top5 = 0.0
         select_top10 = 0.0
+
+        branch_count = 0
+        for sequence in batch:
+
+            # 1️⃣ 先筛出这个 sequence 里所有 branch 数据
+            branch_data_list = [d for d in sequence if d['type'] == 'branch']
+            if len(branch_data_list) == 0:
+                continue
+            # 3️⃣ 随机选一个 branch
+            data = random.choice(branch_data_list)
+            branch_label = data['branch_label']
+            branch_cand = data['branch_cand']
+            col_features = data['col_features'].to(device)
+            row_features = data['row_features'].to(device)
+            edge_attr = data['edge_attr'].to(device)
+            edge_index = data['edge_index'].to(device)
+            logits = self.gnn_encoder(row_features, edge_index, edge_attr, col_features)
+            cand_logits = logits[branch_cand]
+            loss = torch.nn.functional.cross_entropy(
+                cand_logits.unsqueeze(0),
+                torch.tensor(branch_label, dtype=torch.long, device=device).unsqueeze(0)
+            )
+
+            branch_loss += loss
+            branch_count += 1
+
+            # --- 计算准确率 ---
+            pred = cand_logits.argmax().item()
+            if pred == branch_label:
+                branch_top1 += 1
+            # top-5 正确率
+            k = min(5, cand_logits.size(0))
+            top5_preds = cand_logits.topk(k).indices.tolist()
+            if branch_label in top5_preds:
+                branch_top5 += 1
+
+        return branch_loss / branch_count, select_loss, branch_top1/branch_count, branch_top5/branch_count, branch_top10, select_top1, select_top5, select_top10
         
+        branch_lp_features = self.masked_standardize(branch_lp_features, branch_lp_features_masks)
         branch_loss, branch_top1, branch_top5, branch_top10 = self.only_branch_lp_features(branch_lp_features, branch_cands, branch_labels)
         return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
 
@@ -113,10 +128,24 @@ class DTModel(nn.Module):
 
         return branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10
     
-    
+    def masked_standardize(self, x, mask, eps=1e-8):
+        """
+        x: [B, L, F]
+        mask: [B, L]  True=pad, False=valid
+        """
+        valid_mask = (~mask).unsqueeze(-1).float()  # 1 for valid
+        valid_sum = (x * valid_mask).sum(dim=(0, 1))
+        valid_count = valid_mask.sum(dim=(0, 1))
+        mean = valid_sum / (valid_count + eps)
+        var = ((x - mean) ** 2 * valid_mask).sum(dim=(0, 1)) / (valid_count + eps)
+        std = torch.sqrt(var + eps)
+        x_norm = (x - mean) / (std + eps)
+        x_norm = x_norm * valid_mask
+        return x_norm
+
     def only_branch_lp_features(self, branch_lp_features, branch_cands, branch_labels):
-        _branch_lp_features = self.lp_embedding(branch_lp_features)
-        branch_logits = self.branch_head_only_lp_features(_branch_lp_features)
+        branch_lp_embd = self.lp_embedding(branch_lp_features)
+        branch_logits = self.branch_head_only_lp_features(branch_lp_embd)
         branch_loss, branch_top1, branch_top5, branch_top10 = self.cal_branch_loss(branch_logits, branch_cands, branch_labels)
         return branch_loss, branch_top1, branch_top5, branch_top10
     

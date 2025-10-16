@@ -135,8 +135,7 @@ class ScipEvent(Eventhdlr):
                     child_node = [x1, x2, x3, x4, x5, x6, rel_depth, lb/np.min(open_nodes_lb), node_number,child_number,var_idx,bbound,btype]
                     data = {
                         "type" : "node",
-                        "data" : child_node,
-                        "cand" : None,
+                        "node_data" : child_node,
                         "node_number" : child_number
                     }
                     self.saver.squence.append(data)

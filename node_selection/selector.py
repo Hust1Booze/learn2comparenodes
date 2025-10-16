@@ -49,9 +49,8 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
 
         data = {
             "type" : "select",
-            "label" : [select_node_number],
-            "data": [select_node['selnode'].getNumber()],
-            "cand" : open_nodes_number
+            "select_label" : [select_node_number],
+            "select_cand" : open_nodes_number
         }
         self.saver.squence.append(data)
  

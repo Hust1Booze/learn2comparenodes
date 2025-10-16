@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from curses import flash
 import os
 import sys
 import numpy as np
@@ -71,7 +72,7 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
     sequence_saver.save()
 
     print(f"Got behaviour for instance  "+ str(instance).split("/")[-1] + \
-          f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time, objval:{objval}' )
+          f' with {oracle_ns.counter} comparisons, {model.getNNodes()} nodes, {model.getSolvingTime()} time, objval:{objval}' ,flush = True)
     with open("nnodes.csv", "a+") as f:
         f.write(f"{model.getNNodes()},")
         f.close()
@@ -84,11 +85,8 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
 
 def run_episodes(oracle_type, instances, save_dir, save_dir_svm, device,debug_model,random_branching_prob):
     
-    for instance in instances:
-        print(f'dealing {instance}', flush= True)      
+    for instance in instances:    
         run_episode(oracle_type, instance, save_dir, save_dir_svm, device,debug_model,random_branching_prob)
-        print(f'done {instance}\n', flush= True)  
-        
     print("finished running episodes for process")
         
     return 1
@@ -184,6 +182,7 @@ if __name__ == "__main__":
         print(f"Mean solving time  {np.mean(times)}")
         print(f"Median number of node created  {np.median(nnodes)}")
         print(f"Median solving time  {np.median(times)}")
+        print('\n')
     
     
                          

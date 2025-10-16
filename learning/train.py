@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from dataset import BnBSequentialDataset, calculate_average_reward, calculate_average_reward_static, simple_collate_fn
+from dataset import BnBSequentialDataset, collate_fn
 from model import DTModel
 import time
 import gc
@@ -44,8 +44,8 @@ def train():
     valid_dataset = BnBSequentialDataset(f"/lab/shiyh_lab/12332470/code/bnb_gasses/learn2comparenodes/node_selection/data/{problem}/valid", max_samples=max_samples)
     
     # 创建DataLoader
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,collate_fn=simple_collate_fn)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True,collate_fn=collate_fn)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True,collate_fn=collate_fn)
     
     # 创建优化器
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -78,13 +78,12 @@ def train():
         start_time = time.time()
 
         for batch in dataloader:
-            # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
-            states, sequence_data = batch
+
             # 清零梯度
             optimizer.zero_grad()
 
             # 前向传播
-            branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model(states, sequence_data, device)
+            branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model(batch, device)
 
             # 计算总损失
             total_loss = select_loss * select_loss_weight + branch_loss * branch_loss_weight
@@ -147,10 +146,8 @@ def train():
             for i in range(10):
                 for batch in valid_dataloader:
                     # batch现在包含: sequence_data, type_ids, actions, candidates, branch_scores, attention_mask
-                    states, sequence_data = batch
                     # 前向传播
-                    branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model(states, sequence_data, device)
-                    valid_select_loss += select_loss.item()
+                    branch_loss, select_loss, branch_top1, branch_top5, branch_top10, select_top1, select_top5, select_top10 = model(batch, device)
                     valid_branch_loss += branch_loss.item()
                     valid_select_top1.append(select_top1)
                     valid_select_top5.append(select_top5)

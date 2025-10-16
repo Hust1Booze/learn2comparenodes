@@ -7,6 +7,7 @@ from pyscipopt import SCIP_EVENTTYPE,Eventhdlr,SCIP_RESULT
 import torch
 import time
 import utiles
+import numpy as np
 
 
 class Brancher(sp.Branchrule):
@@ -42,22 +43,13 @@ class StrongBranchingRule(sp.Branchrule):
 
     def branchexeclp(self, allowaddcons):
 
-        if self.model.getNNodes() == 1:
-            # initialize root buffer for Khalil features extraction
-            utiles.extract_khalil_variable_features(self.model, [], self.khalil_root_buffer)
-        cands, *_ = self.model.getPseudoBranchCands()
-        state_khalil = utiles.extract_khalil_variable_features(self.model, cands, self.khalil_root_buffer)
-
-        _col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
+        col_features, edge_features, row_features, map =  self.model.getBipartiteGraphRepresentation()
         node_number = self.model.getCurrentNode().getNumber()
 
         branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.scip.getLPBranchCands()
 
         action_set = [c.getCol().getLPPos() for c in branch_cands]
-        if len(_col_features) != len(branch_cands):
-            print(f'col features of branch_cands is not equal to action_set')
 
-        cands_LP_features = [_col_features[i] for i in action_set]
         # Initialise scores for each variable
         scores = [-self.scip.infinity() for _ in range(npriocands)]
         down_bounds = [None for _ in range(npriocands)]
@@ -176,12 +168,32 @@ class StrongBranchingRule(sp.Branchrule):
         # branch_cands[best_cand_idx].getLbLocal()
         # branch_cands[best_cand_idx].getLbOriginal()
         #print(f'branch node {node_number} on {cands_indexs[action]}')
+
+        # 假设 col_features, row_features, edge_features 都是 numpy 数组或 list
+        col_features = torch.tensor(col_features, dtype=torch.float)
+        row_features = torch.tensor(row_features, dtype=torch.float)
+
+        # 从 map 的定义可以看到：
+        # edge_features[i] = [col_idx, row_idx, coef]
+        edge_features = np.array(edge_features)
+
+        # 边的特征就是 coef
+        edge_attr = torch.tensor(edge_features[:, [2]], dtype=torch.float)
+
+        # 图的连接结构，注意：torch_geometric 中要求 edge_index shape = [2, num_edges]
+        edge_index = torch.tensor(
+            np.stack([edge_features[:, 1], edge_features[:, 0]]),  # row_idx 在前，col_idx 在后
+            dtype=torch.long
+        )
+
         data = {
             "type" : "branch",
-            "data" : [action], 
             "branch_label" : action,
-            "cand" : cands_indexs,
-            "LP_features" : cands_LP_features
+            "branch_cand" : action_set,
+            "col_features" : col_features,
+            "row_features" : row_features,
+            "edge_attr" :edge_attr,
+            "edge_index": edge_index,
         }
         self.saver.squence.append(data)
 

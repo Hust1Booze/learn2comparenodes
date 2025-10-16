@@ -1,4 +1,4 @@
-batch_size : 16
+batch_size : 4
 problem : "GISP"
 
 select_loss_weight : 0.0
