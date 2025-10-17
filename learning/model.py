@@ -37,7 +37,8 @@ class DTModel(nn.Module):
         self.max_seq_len = 10000
         self.rope_theta = 10000.0
 
-    
+        self.gcnn_logic = True
+
     def forward(self, batch, device):
         
         branch_loss = torch.tensor(0.0, device=device)
@@ -51,67 +52,116 @@ class DTModel(nn.Module):
 
         branch_count = 0
         for sequence in batch:
-
-            # # 1️⃣ 先筛出这个 sequence 里所有 branch 数据
-            # branch_data_list = [d for d in sequence if d['type'] == 'branch']
-            # if len(branch_data_list) == 0:
-            #     continue
-            # # 3️⃣ 随机选一个 branch
-            # data = random.choice(branch_data_list)
-
-            sequence_embd_list = []
-            node_embd_dict = {}
-            for data in sequence:
-                if data['type'] == 'node':
-                    node_embd = self.node_embedding(data['node_data'].to(device))
-                    node_number = data['node_number']
-                    sequence_embd_list.append(node_embd)
-                    node_embd_dict[node_number] = node_embd
-                elif data['type'] == 'branch':
-                    branch_label = data['branch_label']
-                    branch_cand = data['branch_cand']
-                    col_features = data['col_features'].to(device)
-                    row_features = data['row_features'].to(device)
-                    edge_attr = data['edge_attr'].to(device)
-                    edge_index = data['edge_index'].to(device)
-                    branch_node = data['branch_node']
-
-                    logits, variable_embd = self.gnn_encoder(row_features, edge_index, edge_attr, col_features)
-
-                    if len(sequence_embd_list) != 0:
-                        # use sequence as KV
-                        cur_sequence_embd = self.deal_sequence(sequence_embd_list)
-                        attention_variable_embd = self.cross_attention(variable_embd, cur_sequence_embd)
-                        logits = self.branch_head(attention_variable_embd).squeeze(-1)
-
-                    cand_logits = logits[branch_cand]
-                    loss = torch.nn.functional.cross_entropy(
-                        cand_logits.unsqueeze(0),
-                        torch.tensor(branch_label, dtype=torch.long, device=device).unsqueeze(0)
-                    )
-
-                    branch_loss += loss
-                    branch_count += 1
-
-                    # 选出logits最大的候选，并取其对应的variable embedding
-                    best_cand_idx = cand_logits.argmax().item()
-                    best_var_idx = branch_cand[best_cand_idx]
-                    selected_variable_embd = variable_embd[best_var_idx]
-                    sequence_embd_list.append(self.node_branch_concat(torch.cat([selected_variable_embd, node_embd_dict[branch_node]])))
-                    
-
-                    # --- 计算准确率 ---
-                    pred = cand_logits.argmax().item()
-                    if pred == branch_label:
-                        branch_top1 += 1
-                    # top-5 正确率
-                    k = min(5, cand_logits.size(0))
-                    top5_preds = cand_logits.topk(k).indices.tolist()
-                    if branch_label in top5_preds:
-                        branch_top5 += 1
+            if self.gcnn_logic:
+                _branch_loss, _branch_top1, _branch_top5 ,_branch_count = self.GCNN_train_logic(sequence, device)
+            else:
+                _branch_loss, _branch_top1, _branch_top5 ,_branch_count = self.sequence_train_logic(sequence, device)     
+                
+            branch_loss += _branch_loss
+            branch_top1 += _branch_top1
+            branch_top5 += _branch_top5
+            branch_count += _branch_count         
 
         return branch_loss / branch_count, select_loss, branch_top1/branch_count, branch_top5/branch_count, branch_top10, select_top1, select_top5, select_top10
         
+    def GCNN_train_logic(self, sequence, device):
+        # GCNN logits
+        # 1️⃣ 先筛出这个 sequence 里所有 branch 数据
+        branch_top1 =0;
+        branch_top5 =0;
+        branch_count =0;
+        loss = torch.tensor(0.0, device=device)
+        branch_data_list = [d for d in sequence if d['type'] == 'branch']
+        if len(branch_data_list) == 0:
+            return loss, branch_top1, branch_top5 ,branch_count
+        # 3️⃣ 随机选一个 branch
+        data = random.choice(branch_data_list)
+        branch_label = data['branch_label']
+        branch_cand = data['branch_cand']
+        col_features = data['col_features'].to(device)
+        row_features = data['row_features'].to(device)
+        edge_attr = data['edge_attr'].to(device)
+        edge_index = data['edge_index'].to(device)
+        branch_node = data['branch_node']
+
+        logits, variable_embd = self.gnn_encoder(row_features, edge_index, edge_attr, col_features)
+        cand_logits = logits[branch_cand]
+        loss = torch.nn.functional.cross_entropy(
+            cand_logits.unsqueeze(0),
+            torch.tensor(branch_label, dtype=torch.long, device=device).unsqueeze(0)
+        )
+        # --- 计算准确率 ---
+        pred = cand_logits.argmax().item()
+        if pred == branch_label:
+            branch_top1 += 1
+        # top-5 正确率
+        k = min(5, cand_logits.size(0))
+        top5_preds = cand_logits.topk(k).indices.tolist()
+        if branch_label in top5_preds:
+            branch_top5 += 1
+
+        branch_count +=1
+        
+        return loss, branch_top1, branch_top5 ,branch_count
+
+    def sequence_train_logic(self, sequence, device):
+        branch_top1 =0;
+        branch_top5 =0;
+        branch_count =0;        
+        total_loss = torch.tensor(0.0, device=device)
+
+        sequence_embd_list = []
+        node_embd_dict = {}
+        for data in sequence:
+            if data['type'] == 'node':
+                node_embd = self.node_embedding(data['node_data'].to(device))
+                node_number = data['node_number']
+                sequence_embd_list.append(node_embd)
+                node_embd_dict[node_number] = node_embd
+            elif data['type'] == 'branch':
+                branch_label = data['branch_label']
+                branch_cand = data['branch_cand']
+                col_features = data['col_features'].to(device)
+                row_features = data['row_features'].to(device)
+                edge_attr = data['edge_attr'].to(device)
+                edge_index = data['edge_index'].to(device)
+                branch_node = data['branch_node']
+
+                logits, variable_embd = self.gnn_encoder(row_features, edge_index, edge_attr, col_features)
+
+                if len(sequence_embd_list) != 0:
+                    # use sequence as KV
+                    cur_sequence_embd = self.deal_sequence(sequence_embd_list)
+                    attention_variable_embd = self.cross_attention(variable_embd, cur_sequence_embd)
+                    logits = self.branch_head(attention_variable_embd).squeeze(-1)
+
+                cand_logits = logits[branch_cand]
+                loss = torch.nn.functional.cross_entropy(
+                    cand_logits.unsqueeze(0),
+                    torch.tensor(branch_label, dtype=torch.long, device=device).unsqueeze(0)
+                )
+
+                total_loss += loss
+                branch_count += 1
+
+                # 选出logits最大的候选，并取其对应的variable embedding
+                best_cand_idx = cand_logits.argmax().item()
+                best_var_idx = branch_cand[best_cand_idx]
+                selected_variable_embd = variable_embd[best_var_idx]
+                sequence_embd_list.append(self.node_branch_concat(torch.cat([selected_variable_embd, node_embd_dict[branch_node]])))
+                
+
+                # --- 计算准确率 ---
+                pred = cand_logits.argmax().item()
+                if pred == branch_label:
+                    branch_top1 += 1
+                # top-5 正确率
+                k = min(5, cand_logits.size(0))
+                top5_preds = cand_logits.topk(k).indices.tolist()
+                if branch_label in top5_preds:
+                    branch_top5 += 1
+
+        return total_loss, branch_top1, branch_top5 ,branch_count
     def _rope_cache(self, seq_len, device):
         # 生成cos/sin缓存，形状: (1, 1, seq_len, head_dim/2) -> 之后repeat_interleave到head_dim
         half_dim = self.head_dim // 2
