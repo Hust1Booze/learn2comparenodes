@@ -85,29 +85,14 @@ class ScipEvent(Eventhdlr):
                                 print("error in save branch_cands info")
                             cands_indexs.append(_var_idx) 
 
-
-                        # data = {
-                        #     "type" : "branch",
-                        #     "data" : [var_idx], 
-                        #     "branch_label" : var_idx,
-                        #     "cand" : cands_indexs
-                        # }
-                        # self.saver.squence.append(data)
-
-                        #self.bnbstates.receive_states(data)
                         save_branch_info = True
 
-                    #child_node = torch.tensor([[lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]]).float()
-                    child_node = [lb, -1*ub,depth,node_number,child_number,var_idx,bbound,btype]
 
                     lb = open_node.getLowerbound()
                     estimate = open_node.getEstimate()
                     addedConss = open_node.getNAddedConss()
                     domchg = open_node.getNDomchg()
                     parentBranchings = open_node.getNParentBranchings()
-
-                    # print(f"Node {child_number} - lb: {lb}, estimate: {estimate}")
-                    # print(f"Node {child_number} - addedConss: {addedConss}, domchg: {domchg}, parentBranchings: {parentBranchings}")
 
                     gap = self.model.getGap()
                     LPObjVal = self.model.getLPObjVal()
@@ -117,9 +102,6 @@ class ScipEvent(Eventhdlr):
                     primal_bound = self.model.getPrimalbound() *-1
                     dualbound = self.model.getDualbound()*-1
                     dualboundRoot = self.model.getDualboundRoot()*-1
-
-                    # print(f"Model - gap: {gap}, LPObjVal: {LPObjVal}, local_estimate: {local_estimate}")
-                    # print(f"Model - primal_bound: {primal_bound}, dualbound: {dualbound}, dualboundRoot: {dualboundRoot}")
 
                     x1 = relDistance(lb, LPObjVal)
                     x2 = relDistance(lb, local_estimate)
@@ -132,11 +114,13 @@ class ScipEvent(Eventhdlr):
 
                     rel_depth = (np.max(open_nodes_depth) - depth) / np.max(open_nodes_depth)
 
-                    child_node = [x1, x2, x3, x4, x5, x6, rel_depth, lb/np.min(open_nodes_lb), node_number,child_number,var_idx,bbound,btype]
+                    child_node = torch.tensor([x1, x2, x3, x4, x5, x6, rel_depth, lb/np.min(open_nodes_lb)], dtype=torch.float)
                     data = {
                         "type" : "node",
                         "node_data" : child_node,
-                        "node_number" : child_number
+                        "node_number" : child_number,
+                        "parent_number" : node_number,  
+                        "branch_var" : var
                     }
                     self.saver.squence.append(data)
         

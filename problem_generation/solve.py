@@ -49,9 +49,9 @@ def distribute(n_instance, n_cpu):
 
 if __name__ == "__main__":
     instance = None
-    n_cpu = 8
+    n_cpu = 20
     data_partition = 'train'
-    problem = 'SETCOVER'
+    problem = 'cauctions'
     timelimit = 7200.0
     solveInstance = True
     n_instance = 10000

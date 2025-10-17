@@ -194,6 +194,7 @@ class StrongBranchingRule(sp.Branchrule):
             "row_features" : row_features,
             "edge_attr" :edge_attr,
             "edge_index": edge_index,
+            'branch_node' : node_number,
         }
         self.saver.squence.append(data)
 

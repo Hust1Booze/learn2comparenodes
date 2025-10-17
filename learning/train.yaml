@@ -1,5 +1,5 @@
 batch_size : 4
-problem : "GISP"
+problem : "cauctions"
 
 select_loss_weight : 0.0
 branch_loss_weight : 1

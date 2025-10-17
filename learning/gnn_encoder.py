@@ -85,7 +85,7 @@ class PreNormLayer(torch.nn.Module):
 class BipartiteGraphConvolution(torch_geometric.nn.MessagePassing):
     def __init__(self):
         super().__init__('add')
-        emb_size = 64
+        emb_size = 32
         
         self.feature_module_left = torch.nn.Sequential(
             torch.nn.Linear(emb_size, emb_size)
@@ -154,7 +154,7 @@ class BaseModel(torch.nn.Module):
 class GNNEncoder(BaseModel):
     def __init__(self):
         super().__init__()
-        emb_size = 64
+        emb_size = 32
         cons_nfeats = 14 #5
         edge_nfeats = 1
         var_nfeats = 19
@@ -202,7 +202,7 @@ class GNNEncoder(BaseModel):
         variable_features = self.conv_c_to_v(constraint_features, edge_indices, edge_features, variable_features)
 
         output = self.output_module(variable_features).squeeze(-1)
-        return output
+        return output, variable_features
 
 
 # class GNNEncoder(torch.nn.Module):

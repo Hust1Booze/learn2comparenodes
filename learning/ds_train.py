@@ -164,7 +164,7 @@ def train():
                 writer.add_scalar('Epoch_Time/Duration', duration, epoch)
                 
 
-        if epoch % 100 ==0 :
+        if epoch % 5 ==0 :
             model_engine.eval()
             valid_select_loss = 0
             valid_branch_loss = 0

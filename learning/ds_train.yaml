@@ -1,5 +1,5 @@
-batch_size : 256
-problem : "SETCOVER"
+batch_size : 32
+problem : "cauctions"
 
 select_loss_weight : 0.0
 branch_loss_weight : 1.0

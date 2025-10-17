@@ -35,6 +35,15 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
             gpu_gpu, g = self.comp_behaviour_saver.get_graph_for_inf(self.model, select_node['selnode'])
             #_col_features, _edge_features, _row_features, _map =  self.model.getBipartiteGraphRepresentation()
             self.saver.milp_state = g
+            node = torch.tensor([0, 0, 0, 0, 0, 0, 0, 1], dtype=torch.float)
+            data = {
+                "type" : "node",
+                "node_data" : node,
+                "node_number" : 1,
+                "parent_number" : 1,  
+                "branch_var" : None
+            }
+            self.saver.squence.append(data)
 
         leaves, children, siblings = self.model.getOpenNodes()
         open_nodes = leaves + children + siblings
@@ -46,7 +55,7 @@ class OracleNodeSelRecorder(OracleNodeSelectorAbdel):
         # random select
         # if np.random.rand() < 0.1 and len(open_nodes) > 1:
         #     select_node = {"selnode":open_nodes[np.random.randint(0, len(open_nodes))]}
-
+        
         data = {
             "type" : "select",
             "select_label" : [select_node_number],
