@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH -o node_selection/job.%j.out
-#SBATCH -J gen_data
+#SBATCH -J gen_d
 #SBATCH --partition=cpu
 #SBATCH --qos=cpu
 #SBATCH -N 1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=50
+#SBATCH --cpus-per-task=40
 
 
 

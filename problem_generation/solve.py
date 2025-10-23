@@ -51,7 +51,7 @@ if __name__ == "__main__":
     instance = None
     n_cpu = 20
     data_partition = 'train'
-    problem = 'cauctions'
+    problem = 'facilities'
     timelimit = 7200.0
     solveInstance = True
     n_instance = 10000

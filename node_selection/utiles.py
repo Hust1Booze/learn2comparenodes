@@ -65,6 +65,8 @@ class ScipEvent(Eventhdlr):
                     lb, ub = node.getLowerbound(), node.getEstimate()
                     depth = node.getDepth()
                     bvars, bbounds, btypes = open_node.getParentBranchings()
+                    
+                    
                     for bvar, bbound, btype in zip(bvars, bbounds, btypes): 
                         if str(bvar) in self.var2idx:
                             var_idx = self.var2idx[str(bvar)]
@@ -85,6 +87,44 @@ class ScipEvent(Eventhdlr):
                                 print("error in save branch_cands info")
                             cands_indexs.append(_var_idx) 
 
+                        col_features, edge_features, row_features, map =  self.model.getBipartiteGraphRepresentation()
+                        action_set = [c.getCol().getLPPos() for c in branch_cands]
+                        # 假设 col_features, row_features, edge_features 都是 numpy 数组或 list
+                        col_features = torch.tensor(col_features, dtype=torch.float)
+                        row_features = torch.tensor(row_features, dtype=torch.float)
+
+                        # 从 map 的定义可以看到：
+                        # edge_features[i] = [col_idx, row_idx, coef]
+                        edge_features = np.array(edge_features)
+
+                        # 边的特征就是 coef
+                        edge_attr = torch.tensor(edge_features[:, [2]], dtype=torch.float)
+
+                        # 图的连接结构，注意：torch_geometric 中要求 edge_index shape = [2, num_edges]
+                        edge_index = torch.tensor(
+                            np.stack([edge_features[:, 1], edge_features[:, 0]]),  # row_idx 在前，col_idx 在后
+                            dtype=torch.long
+                        )
+                        # 在branch_cands中查找bvar_0_idx的位置
+                        branch_cand_pos = None
+                        if bvars[0] is not None:
+                            for i, cand in enumerate(branch_cands):
+                                if bvars[0].name == cand.name:
+                                    branch_cand_pos = i
+                                    break
+                        if branch_cand_pos == None:
+                            print(" Error : why not find branch var ?")
+                        data = {
+                            "type" : "branch",
+                            "branch_label" : branch_cand_pos,
+                            "branch_cand" : action_set,
+                            "col_features" : col_features,
+                            "row_features" : row_features,
+                            "edge_attr" :edge_attr,
+                            "edge_index": edge_index,
+                            'branch_node' : node_number,
+                        }
+                        self.saver.squence.append(data)
                         save_branch_info = True
 
 

@@ -65,7 +65,8 @@ def run_episode(oracle_type, instance, save_dir, save_dir_svm, device, debug_mod
         desc="custom BNB_Brancher",
         priority=666666, maxdepth=-1, maxbounddist=1
     )
-
+    # 将 strong branch 的优先级调为最高，不使用自己写的 strong branch rule
+    model.setParam("branching/fullstrong/priority", 1000000)
     # Run the optimizer
     model.optimize()
     objval = model.getObjVal()

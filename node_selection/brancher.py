@@ -43,6 +43,7 @@ class StrongBranchingRule(sp.Branchrule):
 
     def branchexeclp(self, allowaddcons):
 
+        return {"result": SCIP_RESULT.DIDNOTRUN}
         col_features, edge_features, row_features, map =  self.model.getBipartiteGraphRepresentation()
         node_number = self.model.getCurrentNode().getNumber()
 
